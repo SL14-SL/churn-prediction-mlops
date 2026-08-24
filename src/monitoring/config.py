@@ -52,3 +52,118 @@ def get_business_settings() -> dict:
         "max_discount_budget": cfg.get("max_discount_budget"),
         "max_discount_rate": cfg.get("max_discount_rate"),
     }
+
+def get_retraining_settings() -> dict:
+    monitoring_cfg = (
+        get_monitoring_config()
+    )
+
+    retraining_cfg = (
+        monitoring_cfg.get(
+            "retraining",
+            {},
+        )
+    )
+
+    drift_cfg = (
+        retraining_cfg.get(
+            "drift",
+            {},
+        )
+    )
+
+    retraining_performance_cfg = (
+        retraining_cfg.get(
+            "performance",
+            {},
+        )
+    )
+
+    classification_thresholds = (
+        monitoring_cfg.get(
+            "performance",
+            {},
+        ).get(
+            "retrain_thresholds",
+            {},
+        )
+    )
+
+    return {
+        "minimum_new_training_rows": int(
+            retraining_cfg.get(
+                "minimum_new_training_rows",
+                100,
+            )
+        ),
+        "maximum_new_training_rows": int(
+            retraining_cfg.get(
+                "maximum_new_training_rows",
+                100_000,
+            )
+        ),
+        "cooldown_hours": int(
+            retraining_cfg.get(
+                "cooldown_hours",
+                168,
+            )
+        ),
+        "scheduled_interval_hours": int(
+            retraining_cfg.get(
+                "scheduled_interval_hours",
+                168,
+            )
+        ),
+        "drift": {
+            "lookback_days": int(
+                drift_cfg.get(
+                    "lookback_days",
+                    14,
+                )
+            ),
+            "consecutive_windows": int(
+                drift_cfg.get(
+                    "consecutive_windows",
+                    2,
+                )
+            ),
+        },
+        "performance": {
+            "consecutive_windows": int(
+                retraining_performance_cfg.get(
+                    "consecutive_windows",
+                    2,
+                )
+            ),
+            "minimum_samples": int(
+                retraining_performance_cfg.get(
+                    "minimum_samples",
+                    20,
+                )
+            ),
+            "min_f1": float(
+                classification_thresholds.get(
+                    "min_f1",
+                    0.60,
+                )
+            ),
+            "min_recall": float(
+                classification_thresholds.get(
+                    "min_recall",
+                    0.65,
+                )
+            ),
+            "min_roc_auc": float(
+                classification_thresholds.get(
+                    "min_roc_auc",
+                    0.75,
+                )
+            ),
+            "max_brier_score": float(
+                classification_thresholds.get(
+                    "max_brier_score",
+                    0.22,
+                )
+            ),
+        },
+    }

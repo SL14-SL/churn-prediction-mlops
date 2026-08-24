@@ -27,6 +27,21 @@ performance:
     min_roc_auc: 0.75
     max_brier_score: 0.22
 
+retraining:
+  minimum_new_training_rows: 100
+  maximum_new_training_rows: 100000
+
+  cooldown_hours: 168
+  scheduled_interval_hours: 168
+
+  drift:
+    lookback_days: 14
+    consecutive_windows: 2
+
+  performance:
+    consecutive_windows: 2
+    minimum_samples: 20
+
 business:
   enabled: true
 
