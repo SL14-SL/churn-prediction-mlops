@@ -82,33 +82,51 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
 
 def reload_serving_model() -> dict:
     """
-    Reload model state and update API globals.
-    """
-    global model, model_type, serving_alias, model_uri, decision_threshold
-    global serving_model_version, serving_model_run_id, feature_schema
+    Reload the complete serving bundle and update API globals.
 
-    state = reload_model_state(
+    Existing globals are updated only after the new bundle has been
+    loaded and validated successfully.
+    """
+    global model
+    global model_type
+    global serving_alias
+    global model_uri
+    global decision_threshold
+    global serving_model_version
+    global serving_model_run_id
+    global feature_schema
+
+    bundle = reload_model_state(
         model_name=MODEL_NAME,
         cfg=CFG,
     )
 
-    model = state["model"]
-    model_type = state["model_type"]
-    serving_alias = state["serving_alias"]
-    model_uri = state["model_uri"]
-    serving_model_version = state["serving_model_version"]
-    serving_model_run_id = state["serving_model_run_id"]
-    feature_schema = state["feature_schema"]
-    decision_threshold = state.get("decision_threshold", 0.5)
+    model = bundle.model
+    model_type = bundle.model_type
+    serving_alias = bundle.serving_alias
+    model_uri = bundle.model_uri
+    serving_model_version = (
+        bundle.model_version
+    )
+    serving_model_run_id = (
+        bundle.model_run_id
+    )
+    feature_schema = bundle.feature_schema
+    decision_threshold = (
+        bundle.decision_threshold
+    )
 
     return {
-        "model_name": MODEL_NAME,
-        "serving_alias": serving_alias,
-        "model_version": serving_model_version,
-        "model_run_id": serving_model_run_id,
-        "model_uri": model_uri,
-        "decision_threshold": decision_threshold,
+        "model_name": bundle.model_name,
+        "serving_alias": bundle.serving_alias,
+        "model_version": bundle.model_version,
+        "model_run_id": bundle.model_run_id,
+        "model_uri": bundle.model_uri,
+        "decision_threshold": (
+            bundle.decision_threshold
+        ),
     }
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """

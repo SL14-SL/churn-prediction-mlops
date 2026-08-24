@@ -8,6 +8,7 @@ from mlflow import MlflowClient
 
 from src.inference.router import load_registry_model
 from src.inference.schema import load_feature_schema
+from src.inference.serving_bundle import ServingBundle, validate_serving_bundle
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -82,51 +83,78 @@ def reload_serving_model(
     *,
     model_name: str,
     cfg: dict,
-) -> dict[str, Any]:
+) -> ServingBundle:
     """
-    Reload the current champion model from the MLflow Model Registry.
+    Load and validate the complete serving state.
 
-    Returns all serving artifacts/state needed by the API.
+    The caller receives a bundle only after the model, feature schema,
+    decision threshold, and registry metadata have been loaded and
+    validated successfully.
     """
-    mlflow.set_tracking_uri(resolve_tracking_uri(cfg))
+    mlflow.set_tracking_uri(
+        resolve_tracking_uri(cfg)
+    )
 
-    model, model_type, serving_alias, model_uri, decision_threshold = load_registry_model(model_name)
+    (
+        model,
+        model_type,
+        serving_alias,
+        model_uri,
+        decision_threshold,
+    ) = load_registry_model(model_name)
 
-    serving_model_version = None
-    serving_model_run_id = None
-
-    if serving_alias and serving_alias != "unknown":
-        client = MlflowClient()
-        version = client.get_model_version_by_alias(model_name, serving_alias)
-        serving_model_version = str(version.version)
-        serving_model_run_id = version.run_id
-    else:
+    if (
+        not serving_alias
+        or serving_alias == "unknown"
+    ):
         raise RuntimeError(
-            f"Cannot load feature schema because no valid serving alias was resolved "
-            f"for model '{model_name}'."
+            "Cannot load a serving bundle because no valid "
+            f"serving alias was resolved for model '{model_name}'."
         )
 
-    feature_schema = load_feature_schema_from_mlflow(
-        run_id=serving_model_run_id,
-        fallback_to_local=not os.getenv("K_SERVICE"),
-    )
-
-    logger.info(
-        "Model reloaded: %s (alias=%s, version=%s, run_id=%s)",
+    client = MlflowClient()
+    version = client.get_model_version_by_alias(
         model_name,
         serving_alias,
-        serving_model_version,
-        serving_model_run_id,
     )
 
-    return {
-        "model": model,
-        "model_type": model_type,
-        "serving_alias": serving_alias,
-        "model_uri": model_uri,
-        "serving_model_version": serving_model_version,
-        "serving_model_run_id": serving_model_run_id,
-        "feature_schema": feature_schema,
-        "model_name": model_name,
-        "decision_threshold": decision_threshold,
-    }
+    model_version = str(
+        version.version
+    )
+    model_run_id = version.run_id
+
+    feature_schema = (
+        load_feature_schema_from_mlflow(
+            run_id=model_run_id,
+            fallback_to_local=not bool(
+                os.getenv("K_SERVICE")
+            ),
+        )
+    )
+
+    bundle = ServingBundle(
+        model=model,
+        model_name=model_name,
+        model_type=model_type,
+        decision_threshold=float(
+            decision_threshold
+        ),
+        feature_schema=feature_schema,
+        serving_alias=serving_alias,
+        model_uri=model_uri,
+        model_version=model_version,
+        model_run_id=model_run_id,
+    )
+
+    validate_serving_bundle(bundle)
+
+    logger.info(
+        "Serving bundle loaded: %s "
+        "(alias=%s, version=%s, run_id=%s)",
+        bundle.model_name,
+        bundle.serving_alias,
+        bundle.model_version,
+        bundle.model_run_id,
+    )
+
+    return bundle
