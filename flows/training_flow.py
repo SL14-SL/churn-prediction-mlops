@@ -1,17 +1,14 @@
 # --- STANDARD LIBRARY IMPORTS ---
 import sys
-import time
 import shutil
 import logging
 import warnings
-import os
 import hashlib
 import json
 
 from datetime import datetime
 
 # --- THIRD PARTY IMPORTS ---
-import requests
 import mlflow
 
 from google.cloud import storage
@@ -44,6 +41,9 @@ from src.deployment.prediction_probe import build_prediction_probe
 from src.inference.releases.publisher import publish_serving_release
 
 from src.utils.logger import get_logger
+
+from flows.deployment_flow import deploy_and_verify_release
+from flows.tasks.serving_tasks import task_resolve_previous_release
 
 # --- INITIALIZE CONFIGURATION ---
 GCP_CFG = load_config("gcp.yaml")
@@ -397,55 +397,6 @@ def task_archive_logs():
     
     return archived_count
 
-@task(name="Refresh API")
-def task_refresh_api() -> None:
-    """
-    Refresh the API model after a new champion has been promoted.
-
-    Calls the API reload endpoint instead of restarting the container.
-    """
-    p_logger = get_run_logger()
-    cfg = load_config()
-
-    api_url = cfg.get("api", {}).get("url", "http://api:8080/predict")
-    base_url = api_url.replace("/predict", "")
-    reload_url = f"{base_url}/admin/reload-model"
-
-    api_key = os.getenv("API_KEY")
-
-    response = requests.post(
-        reload_url,
-        headers={"X-API-KEY": api_key},
-        timeout=30,
-    )
-
-    response.raise_for_status()
-    p_logger.info(f"API model reload successful: {response.json()}")
-
-@task(name="Verify API Health")
-def task_verify_health():
-    p_logger = get_run_logger()
-
-    api_url = ENV_CFG["api"]["url"].rsplit("/", 1)[0] + "/health"
-    p_logger.info(f"Checking API health at: {api_url}")
-
-    for i in range(20):  # 20 Versuche
-        try:
-            r = requests.get(api_url, timeout=10)
-
-            if r.status_code == 200:
-                p_logger.info("API is healthy.")
-                return True
-
-            p_logger.warning(f"Attempt {i+1}: status {r.status_code}")
-
-        except requests.exceptions.RequestException as e:
-            p_logger.warning(f"Attempt {i+1}: not reachable ({e})")
-
-        time.sleep(10)
-
-    raise Exception("API did not recover after refresh!")
-
 
 @flow(name="End-to-End Churn Pipeline")
 def training_pipeline(force_run: bool = False):
@@ -476,13 +427,21 @@ def training_pipeline(force_run: bool = False):
     )
 
     release_manifest = None
+    deployment_result = None
+    previous_release_id = None
 
     if should_refresh_api(
         registration_result["promoted"]
     ):
+        previous_release_id = (
+            task_resolve_previous_release()
+        )
+
         p_logger.info(
             "New Champion detected. "
-            "Publishing serving release."
+            "Publishing serving release | "
+            "previous_release_id=%s",
+            previous_release_id,
         )
 
         release_manifest = (
@@ -496,16 +455,28 @@ def training_pipeline(force_run: bool = False):
             )
         )
 
+        release_id = release_manifest[
+            "release_id"
+        ]
+
         p_logger.info(
             "Serving release published. "
-            "Refreshing API."
+            "Starting verified deployment | "
+            "release_id=%s",
+            release_id,
         )
 
-        task_refresh_api()
-        task_verify_health()
+        deployment_result = (
+            deploy_and_verify_release(
+                release_id=release_id,
+                previous_release_id=(
+                    previous_release_id
+                ),
+            )
+        )
     else:
         p_logger.info(
-            "No API refresh needed. "
+            "No deployment needed. "
             "Current Champion remains active."
         )
     p_logger.info("Pipeline execution finished successfully.")
@@ -527,6 +498,16 @@ def training_pipeline(force_run: bool = False):
                 "release_id"
             ]
             if release_manifest
+            else None
+        ),
+        "previous_release_id": (
+            previous_release_id
+        ),
+        "deployment_status": (
+            deployment_result[
+                "deployment_status"
+            ]
+            if deployment_result
             else None
         ),
     }

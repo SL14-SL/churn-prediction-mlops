@@ -38,14 +38,6 @@ def mock_flow_runtime():
             "flows.training_flow.get_run_logger",
             return_value=mock_logger,
         ),
-        patch(
-            "flows.training_flow.task_refresh_api",
-            return_value=None,
-        ),
-        patch(
-            "flows.training_flow.task_verify_health",
-            return_value=True,
-        ),
     ):
         yield
 
@@ -63,8 +55,8 @@ def test_training_pipeline_stable_system_only_evaluates_champion(
     mock_log_dataset_metadata = MagicMock()
     mock_eval_and_reg = MagicMock()
     mock_publish_release = MagicMock()
-    mock_refresh_api = MagicMock()
-    mock_verify_health = MagicMock()
+    mock_resolve_previous = MagicMock()
+    mock_deploy_release = MagicMock()
 
     monkeypatch.setattr(
         "flows.training_flow.task_check_drift",
@@ -104,12 +96,14 @@ def test_training_pipeline_stable_system_only_evaluates_champion(
         mock_publish_release,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_refresh_api",
-        mock_refresh_api,
+        "flows.training_flow."
+        "task_resolve_previous_release",
+        mock_resolve_previous,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_verify_health",
-        mock_verify_health,
+        "flows.training_flow."
+        "deploy_and_verify_release",
+        mock_deploy_release,
     )
 
     training_flow.training_pipeline.fn(
@@ -125,8 +119,8 @@ def test_training_pipeline_stable_system_only_evaluates_champion(
     mock_log_dataset_metadata.assert_not_called()
     mock_eval_and_reg.assert_not_called()
     mock_publish_release.assert_not_called()
-    mock_refresh_api.assert_not_called()
-    mock_verify_health.assert_not_called()
+    mock_resolve_previous.assert_not_called()
+    mock_deploy_release.assert_not_called()
 
 
 def test_training_pipeline_force_run_executes_training_path(
@@ -162,8 +156,8 @@ def test_training_pipeline_force_run_executes_training_path(
         return_value=registration_result
     )
     mock_publish_release = MagicMock()
-    mock_refresh_api = MagicMock()
-    mock_verify_health = MagicMock()
+    mock_resolve_previous = MagicMock()
+    mock_deploy_release = MagicMock()
 
     monkeypatch.setattr(
         "flows.training_flow.task_check_drift",
@@ -203,12 +197,14 @@ def test_training_pipeline_force_run_executes_training_path(
         mock_publish_release,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_refresh_api",
-        mock_refresh_api,
+        "flows.training_flow."
+        "task_resolve_previous_release",
+        mock_resolve_previous,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_verify_health",
-        mock_verify_health,
+        "flows.training_flow."
+        "deploy_and_verify_release",
+        mock_deploy_release,
     )
 
     result = (
@@ -234,14 +230,16 @@ def test_training_pipeline_force_run_executes_training_path(
     )
 
     mock_publish_release.assert_not_called()
-    mock_refresh_api.assert_not_called()
-    mock_verify_health.assert_not_called()
+    mock_resolve_previous.assert_not_called()
+    mock_deploy_release.assert_not_called()
 
     assert result == {
         "run_id": "run_123",
         "champion_promoted": False,
         "model_version": "7",
         "serving_release_id": None,
+        "previous_release_id": None,
+        "deployment_status": None,
     }
 
 
@@ -286,8 +284,20 @@ def test_training_pipeline_drift_with_new_champion_refreshes_api(
     mock_publish_release = MagicMock(
         return_value=published_manifest
     )
-    mock_refresh_api = MagicMock()
-    mock_verify_health = MagicMock()
+    mock_resolve_previous = MagicMock(
+        return_value="release-previous"
+    )
+
+    mock_deploy_release = MagicMock(
+        return_value={
+            "deployment_status": "verified",
+            "release_id": "release-8",
+            "verification": {
+                "release_id": "release-8",
+            },
+            "rolled_back": False,
+        }
+    )
 
     monkeypatch.setattr(
         "flows.training_flow.task_check_drift",
@@ -327,12 +337,14 @@ def test_training_pipeline_drift_with_new_champion_refreshes_api(
         mock_publish_release,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_refresh_api",
-        mock_refresh_api,
+        "flows.training_flow."
+        "task_resolve_previous_release",
+        mock_resolve_previous,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_verify_health",
-        mock_verify_health,
+        "flows.training_flow."
+        "deploy_and_verify_release",
+        mock_deploy_release,
     )
 
     result = (
@@ -364,14 +376,30 @@ def test_training_pipeline_drift_with_new_champion_refreshes_api(
         dataset_manifest=dataset_manifest,
     )
 
-    mock_refresh_api.assert_called_once()
-    mock_verify_health.assert_called_once()
+    mock_resolve_previous = MagicMock(
+        return_value="release-previous"
+    )
+
+    mock_deploy_release = MagicMock(
+        return_value={
+            "deployment_status": "verified",
+            "release_id": "release-8",
+            "verification": {
+                "release_id": "release-8",
+            },
+            "rolled_back": False,
+        }
+    )
 
     assert result == {
         "run_id": "run_456",
         "champion_promoted": True,
         "model_version": "8",
         "serving_release_id": "release-8",
+        "previous_release_id": (
+            "release-previous"
+        ),
+        "deployment_status": "verified",
     }
 
 
@@ -408,8 +436,8 @@ def test_training_pipeline_drift_without_new_champion_skips_refresh(
         return_value=registration_result
     )
     mock_publish_release = MagicMock()
-    mock_refresh_api = MagicMock()
-    mock_verify_health = MagicMock()
+    mock_resolve_previous = MagicMock()
+    mock_deploy_release = MagicMock()
 
     monkeypatch.setattr(
         "flows.training_flow.task_check_drift",
@@ -449,12 +477,14 @@ def test_training_pipeline_drift_without_new_champion_skips_refresh(
         mock_publish_release,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_refresh_api",
-        mock_refresh_api,
+        "flows.training_flow."
+        "task_resolve_previous_release",
+        mock_resolve_previous,
     )
     monkeypatch.setattr(
-        "flows.training_flow.task_verify_health",
-        mock_verify_health,
+        "flows.training_flow."
+        "deploy_and_verify_release",
+        mock_deploy_release,
     )
 
     result = (
@@ -480,14 +510,16 @@ def test_training_pipeline_drift_without_new_champion_skips_refresh(
     )
 
     mock_publish_release.assert_not_called()
-    mock_refresh_api.assert_not_called()
-    mock_verify_health.assert_not_called()
+    mock_resolve_previous.assert_not_called()
+    mock_deploy_release.assert_not_called()
 
     assert result == {
         "run_id": "run_789",
         "champion_promoted": False,
         "model_version": "9",
         "serving_release_id": None,
+        "previous_release_id": None,
+        "deployment_status": None,
     }
 
 
