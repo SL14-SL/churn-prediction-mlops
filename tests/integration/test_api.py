@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch
 
+from src.inference.serving_bundle import ServingBundle
+
 
 @pytest.fixture(autouse=True)
 def mock_api_dependencies(monkeypatch, mock_xgb_model):
@@ -29,16 +31,45 @@ def mock_api_dependencies(monkeypatch, mock_xgb_model):
         "dq_summary": {"quality_status": "ok", "row_count": 1},
     }
 
+    mocked_bundle = ServingBundle(
+        model=mock_xgb_model,
+        model_name=(
+            "customer-churn-model-dev"
+        ),
+        model_type="xgboost",
+        decision_threshold=0.5,
+        feature_schema={
+            "columns": [
+                "tenure",
+                "monthlycharges",
+            ],
+            "dtypes": {
+                "tenure": "float64",
+                "monthlycharges": "float64",
+            },
+        },
+        serving_alias="champion",
+        model_uri=(
+            "models:/"
+            "customer-churn-model-dev"
+            "@champion"
+        ),
+        model_version="test-version",
+        model_run_id="test-run-id",
+    )
+
     with (
-        patch("src.api.app.model", mock_xgb_model),
-        patch("src.api.app.model_type", "xgboost"),
-        patch("src.api.app.serving_alias", "champion"),
-        patch("src.api.app.serving_model_version", "test-version"),
-        patch("src.api.app.serving_model_run_id", "test-run-id"),
-        patch("src.api.app.feature_schema", None),
-        patch("src.api.app.decision_threshold", 0.5),
-        patch("src.api.app.run_prediction_pipeline", return_value=mocked_pipeline_output),
-        patch("src.api.app.log_prediction"),
+        patch(
+            "src.api.app.active_serving_bundle",
+            mocked_bundle,
+        ),
+        patch(
+            "src.api.app.run_prediction_pipeline",
+            return_value=mocked_pipeline_output,
+        ),
+        patch(
+            "src.api.app.log_prediction",
+        )
     ):
         yield
 
@@ -111,3 +142,51 @@ def test_livez_endpoint(api_client):
     assert body["status"] == "alive"
     assert "service" in body
     assert "environment" in body
+
+
+def test_failed_bundle_reload_keeps_previous_serving_state(
+    mock_xgb_model,
+):
+    from src.api import app as api_app
+
+    previous_bundle = ServingBundle(
+        model=mock_xgb_model,
+        model_name="customer-churn-model-dev",
+        model_type="xgboost",
+        decision_threshold=0.5,
+        feature_schema={
+            "columns": ["tenure"],
+            "dtypes": {
+                "tenure": "float64",
+            },
+        },
+        serving_alias="champion",
+        model_uri=(
+            "models:/"
+            "customer-churn-model-dev"
+            "@champion"
+        ),
+        model_version="4",
+        model_run_id="run-4",
+    )
+
+    api_app.active_serving_bundle = (
+        previous_bundle
+    )
+
+    with patch(
+        "src.api.app.reload_model_state",
+        side_effect=RuntimeError(
+            "Replacement bundle is invalid."
+        ),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="Replacement bundle is invalid",
+        ):
+            api_app.reload_serving_model()
+
+    assert (
+        api_app.active_serving_bundle
+        is previous_bundle
+    )

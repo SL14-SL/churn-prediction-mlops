@@ -36,6 +36,7 @@ from src.inference.pipeline import (
 from src.inference.adapters import request_to_dataframe
 from src.inference.explain import explain_single_prediction
 from src.inference.model_manager import reload_serving_model as reload_model_state
+from src.inference.serving_bundle import ServingBundle
 
 from src.api.services import (
     run_prediction_pipeline,
@@ -55,16 +56,31 @@ TRAIN_CFG = load_config("training.yaml")
 MODEL_NAME = CFG["model"]["registry_name"]
 MODELS_PATH = Path(get_path("models"))
 
-# Global variables for caching
-model = None
-model_type = "unknown"
-serving_alias = "unknown"
-model_uri = None
-dq_reference_categories: dict[str, set[str]] = {}
-serving_model_version = None
-serving_model_run_id = None
-feature_schema = None
-decision_threshold = 0.5
+active_serving_bundle: (
+    ServingBundle | None
+) = None
+
+dq_reference_categories: dict[
+    str,
+    set[str],
+] = {}
+
+def require_active_serving_bundle() -> ServingBundle:
+    """
+    Return the currently active serving bundle.
+
+    A local reference ensures one request uses one consistent bundle,
+    even if another request reloads the model concurrently.
+    """
+    bundle = active_serving_bundle
+
+    if bundle is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No complete serving bundle is active.",
+        )
+
+    return bundle
 
 # API Key Security Configuration
 API_KEY_NAME = "X-API-KEY"
@@ -82,48 +98,34 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
 
 def reload_serving_model() -> dict:
     """
-    Reload the complete serving bundle and update API globals.
+    Atomically replace the active serving bundle.
 
-    Existing globals are updated only after the new bundle has been
-    loaded and validated successfully.
+    The previous bundle remains active if loading or validation of the
+    replacement fails.
     """
-    global model
-    global model_type
-    global serving_alias
-    global model_uri
-    global decision_threshold
-    global serving_model_version
-    global serving_model_run_id
-    global feature_schema
+    global active_serving_bundle
 
-    bundle = reload_model_state(
+    new_bundle = reload_model_state(
         model_name=MODEL_NAME,
         cfg=CFG,
     )
 
-    model = bundle.model
-    model_type = bundle.model_type
-    serving_alias = bundle.serving_alias
-    model_uri = bundle.model_uri
-    serving_model_version = (
-        bundle.model_version
-    )
-    serving_model_run_id = (
-        bundle.model_run_id
-    )
-    feature_schema = bundle.feature_schema
-    decision_threshold = (
-        bundle.decision_threshold
-    )
+    active_serving_bundle = new_bundle
 
     return {
-        "model_name": bundle.model_name,
-        "serving_alias": bundle.serving_alias,
-        "model_version": bundle.model_version,
-        "model_run_id": bundle.model_run_id,
-        "model_uri": bundle.model_uri,
+        "model_name": new_bundle.model_name,
+        "serving_alias": (
+            new_bundle.serving_alias
+        ),
+        "model_version": (
+            new_bundle.model_version
+        ),
+        "model_run_id": (
+            new_bundle.model_run_id
+        ),
+        "model_uri": new_bundle.model_uri,
         "decision_threshold": (
-            bundle.decision_threshold
+            new_bundle.decision_threshold
         ),
     }
 
@@ -133,8 +135,8 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown.
     Loads the ML model from registry and initializes data quality caches.
     """
-    global model, model_type, model_uri, serving_alias
-    global serving_model_version, serving_model_run_id, dq_reference_categories
+    global active_serving_bundle
+    global dq_reference_categories
 
     try:
         if os.getenv("SMOKE_TEST") == "1":
@@ -154,10 +156,15 @@ async def lifespan(app: FastAPI):
         # --- Load Model from MLflow ---
         try:
             reload_serving_model()
-            logger.info(f"✅ Model loaded: {MODEL_NAME} (Version: {serving_model_version})")
+
+            logger.info(
+                "Model loaded: %s (version=%s)",
+                active_serving_bundle.model_name,
+                active_serving_bundle.model_version,
+            )
         except Exception as model_err:
             logger.error(f"❌ Failed to load model from registry: {model_err}")
-            model = None
+            active_serving_bundle = None
 
         yield
     finally:
@@ -233,14 +240,33 @@ def reload_model(api_key: str = Depends(get_api_key)):
 
 @app.get("/health")
 def health(response: Response):
-    is_healthy = model is not None
+    bundle = active_serving_bundle
+    is_healthy = bundle is not None
+
     if not is_healthy:
         response.status_code = 503
+
     return {
-        "status": "online" if is_healthy else "degraded",
-        "model_name": MODEL_NAME,
-        "serving_alias": serving_alias,
-        "model_version": serving_model_version
+        "status": (
+            "online"
+            if is_healthy
+            else "degraded"
+        ),
+        "model_name": (
+            bundle.model_name
+            if bundle
+            else MODEL_NAME
+        ),
+        "serving_alias": (
+            bundle.serving_alias
+            if bundle
+            else None
+        ),
+        "model_version": (
+            bundle.model_version
+            if bundle
+            else None
+        ),
     }
 
 @app.get("/livez")
@@ -260,21 +286,27 @@ def livez():
 @app.get("/readyz")
 def readyz():
     """
-    Readiness probe.
-
-    Returns 200 only if the API is ready to serve predictions.
+    Return 200 only when one complete serving bundle is active.
     """
-    if model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Model is not loaded.",
-        )
+    bundle = require_active_serving_bundle()
 
     return {
         "status": "ready",
-        "model_name": MODEL_NAME,
-        "serving_alias": serving_alias,
-        "model_version": serving_model_version,
+        "model_name": bundle.model_name,
+        "model_type": bundle.model_type,
+        "serving_alias": (
+            bundle.serving_alias
+        ),
+        "model_version": (
+            bundle.model_version
+        ),
+        "model_run_id": (
+            bundle.model_run_id
+        ),
+        "model_uri": bundle.model_uri,
+        "decision_threshold": (
+            bundle.decision_threshold
+        ),
     }
 
 @app.post("/explain", dependencies=[Depends(get_api_key)])
@@ -284,8 +316,7 @@ def explain(payload: PredictionRequest, top_n: int = 5):
 
     Intended for debugging, demos, and customer-level model interpretation.
     """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+    bundle = require_active_serving_bundle()
 
     if len(payload.inputs) != 1:
         raise HTTPException(
@@ -300,21 +331,21 @@ def explain(payload: PredictionRequest, top_n: int = 5):
 
         final_df = align_features_for_model(
             processed_df=processed_df,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
         )
 
         prediction = predict_and_decide(
             input_df=final_df,
-            model=model,
+            model=bundle.model,
         )[0]
 
         explanation = explain_single_prediction(
             final_df=final_df,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
             train_cfg=TRAIN_CFG,
             top_n=top_n,
         )
@@ -325,8 +356,8 @@ def explain(payload: PredictionRequest, top_n: int = 5):
             "top_reasons": explanation,
             "metadata": {
                 "model_name": MODEL_NAME,
-                "serving_alias": serving_alias,
-                "model_version": serving_model_version,
+                "serving_alias": bundle.serving_alias,
+                "model_version": bundle.model_version,
             },
         }
 
@@ -336,18 +367,17 @@ def explain(payload: PredictionRequest, top_n: int = 5):
 
 @app.post("/predict", dependencies=[Depends(get_api_key)], response_model=PredictionResponse)
 def predict(payload: PredictionRequest):
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+    bundle = require_active_serving_bundle()
 
     try:
         output = run_prediction_pipeline(
             payload=payload,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
             train_cfg=TRAIN_CFG,
             dq_reference_categories=dq_reference_categories,
-            decision_threshold=decision_threshold,
+            decision_threshold=bundle.decision_threshold,
         )
 
         results = output["results"]
@@ -356,9 +386,9 @@ def predict(payload: PredictionRequest):
             log_prediction(
                 features,
                 result["churn_probability"],
-                model_alias=serving_alias,
-                model_version=serving_model_version,
-                model_run_id=serving_model_run_id,
+                model_alias=bundle.serving_alias,
+                model_version=bundle.model_version,
+                model_run_id=bundle.model_run_id,
                 request_id=output["request_id"],
                 environment=output["environment"],
                 action=result["action"],
@@ -372,7 +402,7 @@ def predict(payload: PredictionRequest):
             "metadata": {
                 "rows": len(results),
                 "model_name": MODEL_NAME,
-                "serving_alias": serving_alias,
+                "serving_alias": bundle.serving_alias,
                 "request_id": output["request_id"],
                 "timing_ms": output["timings"],
                 "data_quality": output["dq_summary"],
@@ -385,18 +415,17 @@ def predict(payload: PredictionRequest):
     
 @app.post("/prioritize", dependencies=[Depends(get_api_key)], response_model=PredictionResponse)
 def prioritize(payload: PrioritizeRequest):
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+    bundle = require_active_serving_bundle()
 
     try:
         output = run_prediction_pipeline(
             payload=payload,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
             train_cfg=TRAIN_CFG,
             dq_reference_categories=dq_reference_categories,
-            decision_threshold=decision_threshold,
+            decision_threshold=bundle.decision_threshold,
         )
 
         enriched = attach_customer_ids(payload.inputs, output["results"])
@@ -419,7 +448,7 @@ def prioritize(payload: PrioritizeRequest):
                 "business_kpis": business_kpis,
                 "min_expected_value": payload.min_expected_value,
                 "model_name": MODEL_NAME,
-                "serving_alias": serving_alias,
+                "serving_alias": bundle.serving_alias,
                 "request_id": output["request_id"],
                 "timing_ms": output["timings"],
                 "data_quality": output["dq_summary"],
@@ -438,19 +467,18 @@ def export_prioritized(payload: PrioritizeRequest):
 
     Uses the same pipeline as /prioritize but returns a downloadable CSV file.
     """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+    bundle = require_active_serving_bundle()
 
     try:
         # 1. Run shared pipeline
         output = run_prediction_pipeline(
             payload=payload,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
             train_cfg=TRAIN_CFG,
             dq_reference_categories=dq_reference_categories,
-            decision_threshold=decision_threshold,
+            decision_threshold=bundle.decision_threshold,
         )
 
         # 2. Attach IDs + prioritize
@@ -510,18 +538,17 @@ def simulate_retention_campaign(payload: CampaignSimulationRequest):
     - targeted customers
     - actionable customers
     """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not ready.")
+    bundle = require_active_serving_bundle()
 
     try:
         output = run_prediction_pipeline(
             payload=payload,
-            model=model,
-            model_type=model_type,
-            feature_schema=feature_schema,
+            model=bundle.model,
+            model_type=bundle.model_type,
+            feature_schema=bundle.feature_schema,
             train_cfg=TRAIN_CFG,
             dq_reference_categories=dq_reference_categories,
-            decision_threshold=decision_threshold,
+            decision_threshold=bundle.decision_threshold,
         )
 
         enriched = attach_customer_ids(payload.inputs, output["results"])
@@ -546,7 +573,7 @@ def simulate_retention_campaign(payload: CampaignSimulationRequest):
                 "total_input_rows": len(payload.inputs),
                 "selected_rows": len(prioritized),
                 "model_name": MODEL_NAME,
-                "serving_alias": serving_alias,
+                "serving_alias": bundle.serving_alias,
                 "request_id": output["request_id"],
                 "timing_ms": output["timings"],
                 "data_quality": output["dq_summary"],
