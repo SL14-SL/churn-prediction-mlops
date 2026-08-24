@@ -483,6 +483,7 @@ def training_pipeline(force_run: bool = False):
 
     return {
         "run_id": run_id,
+        "candidate_run_id": run_id,
         "champion_promoted": bool(
             registration_result[
                 "promoted"

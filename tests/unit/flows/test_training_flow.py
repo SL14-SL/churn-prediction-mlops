@@ -235,6 +235,7 @@ def test_training_pipeline_force_run_executes_training_path(
 
     assert result == {
         "run_id": "run_123",
+        "candidate_run_id": "run_123",
         "champion_promoted": False,
         "model_version": "7",
         "serving_release_id": None,
@@ -393,6 +394,7 @@ def test_training_pipeline_drift_with_new_champion_refreshes_api(
 
     assert result == {
         "run_id": "run_456",
+        "candidate_run_id": "run_456",
         "champion_promoted": True,
         "model_version": "8",
         "serving_release_id": "release-8",
@@ -515,6 +517,7 @@ def test_training_pipeline_drift_without_new_champion_skips_refresh(
 
     assert result == {
         "run_id": "run_789",
+        "candidate_run_id": "run_789",
         "champion_promoted": False,
         "model_version": "9",
         "serving_release_id": None,
