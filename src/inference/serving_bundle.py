@@ -1,8 +1,152 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any
 
+@dataclass(frozen=True)
+class ServingArtifactReference:
+    """
+    Reference to one immutable serving artifact.
+    """
+
+    path: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ServingReleaseManifest:
+    """
+    Persistent description of one complete churn serving release.
+    """
+
+    schema_version: int
+    release_id: str
+    created_at_utc: str
+
+    model_name: str
+    model_version: str
+    model_run_id: str
+    model_uri: str
+    model_type: str
+
+    decision_threshold: float
+
+    dataset_version: str | None
+    config_hash: str | None
+    git_commit: str | None
+
+    feature_schema: (
+        ServingArtifactReference
+    )
+
+    prediction_probe: (
+        ServingArtifactReference | None
+    ) = None
+
+    def to_dict(
+        self,
+    ) -> dict[str, Any]:
+        return asdict(self)
+
+def validate_artifact_reference(
+    reference: ServingArtifactReference,
+    *,
+    name: str,
+) -> None:
+    """
+    Validate one immutable serving artifact reference.
+    """
+    if not isinstance(
+        reference,
+        ServingArtifactReference,
+    ):
+        raise ValueError(
+            f"Serving manifest has an invalid {name} reference."
+        )
+
+    if not reference.path:
+        raise ValueError(
+            f"Serving manifest {name} has no path."
+        )
+
+    if not reference.sha256:
+        raise ValueError(
+            f"Serving manifest {name} has no checksum."
+        )
+
+    
+def validate_serving_manifest(
+    manifest: ServingReleaseManifest,
+) -> None:
+    """
+    Raise ValueError if a serving release manifest is incomplete.
+    """
+    if manifest.schema_version < 1:
+        raise ValueError(
+            "Serving manifest has an invalid schema version."
+        )
+
+    if not manifest.release_id:
+        raise ValueError(
+            "Serving manifest has no release ID."
+        )
+
+    if not manifest.created_at_utc:
+        raise ValueError(
+            "Serving manifest has no creation timestamp."
+        )
+
+    if not manifest.model_name:
+        raise ValueError(
+            "Serving manifest has no model name."
+        )
+
+    if not manifest.model_version:
+        raise ValueError(
+            "Serving manifest has no model version."
+        )
+
+    if not manifest.model_run_id:
+        raise ValueError(
+            "Serving manifest has no model run ID."
+        )
+
+    if not manifest.model_uri:
+        raise ValueError(
+            "Serving manifest has no model URI."
+        )
+
+    if not manifest.model_type:
+        raise ValueError(
+            "Serving manifest has no model type."
+        )
+
+    if not isinstance(
+        manifest.decision_threshold,
+        (int, float),
+    ):
+        raise ValueError(
+            "Serving manifest has an invalid decision threshold."
+        )
+
+    if not 0.0 <= float(
+        manifest.decision_threshold
+    ) <= 1.0:
+        raise ValueError(
+            "Serving manifest decision threshold must be "
+            "between 0 and 1."
+        )
+
+    validate_artifact_reference(
+        manifest.feature_schema,
+        name="feature schema",
+    )
+
+    if manifest.prediction_probe is not None:
+        validate_artifact_reference(
+            manifest.prediction_probe,
+            name="prediction probe",
+        )
 
 @dataclass(frozen=True)
 class ServingBundle:
