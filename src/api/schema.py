@@ -115,4 +115,16 @@ class CampaignSimulationRequest(PrioritizeRequest):
         default=None,
         description="Optional campaign name for reporting",
     )
-    
+
+
+class ServingRollbackRequest(
+    BaseModel
+):
+    release_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Immutable serving release "
+            "to activate."
+        ),
+    )

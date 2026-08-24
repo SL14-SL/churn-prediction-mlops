@@ -15,7 +15,14 @@ from fastapi_swagger_ui_theme import setup_swagger_ui_theme
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.status import HTTP_403_FORBIDDEN
 
-from src.api.schema import PredictionRequest, PredictionResponse, PrioritizeRequest, CampaignSimulationRequest
+from src.api.schema import (
+    PredictionRequest, 
+    PredictionResponse, 
+    PrioritizeRequest, 
+    CampaignSimulationRequest,
+    ServingRollbackRequest,
+)
+
 from src.configs.loader import load_config, get_path
 
 from src.monitoring.prediction_logger import log_prediction
@@ -35,8 +42,10 @@ from src.inference.pipeline import (
 )
 from src.inference.adapters import request_to_dataframe
 from src.inference.explain import explain_single_prediction
-from src.inference.model_manager import reload_serving_model as reload_model_state
-from src.inference.serving_bundle import ServingBundle
+from src.inference.model_manager import reload_serving_model as reload_model_state, load_serving_bundle_for_release
+from src.inference.serving_bundle import ServingBundle, validate_serving_bundle
+
+from src.inference.releases.repository import activate_release_pointer, load_active_release_id
 
 from src.api.services import (
     run_prediction_pipeline,
@@ -82,6 +91,38 @@ def require_active_serving_bundle() -> ServingBundle:
 
     return bundle
 
+def activate_serving_bundle(
+    bundle: ServingBundle,
+) -> dict:
+    """
+    Atomically activate an already validated serving bundle.
+    """
+    global active_serving_bundle
+
+    validate_serving_bundle(
+        bundle
+    )
+
+    active_serving_bundle = bundle
+
+    return {
+        "release_id": bundle.release_id,
+        "model_name": bundle.model_name,
+        "serving_alias": (
+            bundle.serving_alias
+        ),
+        "model_version": (
+            bundle.model_version
+        ),
+        "model_run_id": (
+            bundle.model_run_id
+        ),
+        "model_uri": bundle.model_uri,
+        "decision_threshold": (
+            bundle.decision_threshold
+        ),
+    }
+
 # API Key Security Configuration
 API_KEY_NAME = "X-API-KEY"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -103,31 +144,16 @@ def reload_serving_model() -> dict:
     The previous bundle remains active if loading or validation of the
     replacement fails.
     """
-    global active_serving_bundle
-
     new_bundle = reload_model_state(
         model_name=MODEL_NAME,
         cfg=CFG,
     )
 
-    active_serving_bundle = new_bundle
+    return activate_serving_bundle(
+        new_bundle
+    )
 
-    return {
-        "model_name": new_bundle.model_name,
-        "serving_alias": (
-            new_bundle.serving_alias
-        ),
-        "model_version": (
-            new_bundle.model_version
-        ),
-        "model_run_id": (
-            new_bundle.model_run_id
-        ),
-        "model_uri": new_bundle.model_uri,
-        "decision_threshold": (
-            new_bundle.decision_threshold
-        ),
-    }
+    
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -235,6 +261,143 @@ def reload_model(api_key: str = Depends(get_api_key)):
 
     return {
         "status": "reloaded",
+        **result,
+    }
+
+@app.post(
+    "/admin/rollback-serving-release"
+)
+def rollback_serving_release(
+    payload: ServingRollbackRequest,
+    api_key: str = Depends(
+        get_api_key
+    ),
+):
+    """
+    Validate and atomically activate a previously published release.
+    """
+    previous_bundle = (
+        require_active_serving_bundle()
+    )
+    previous_release_id = (
+        previous_bundle.release_id
+    )
+
+    stored_release_id = (
+        load_active_release_id(
+            models_path=MODELS_PATH,
+        )
+    )
+
+    if (
+        stored_release_id
+        != previous_release_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "In-memory serving release does "
+                "not match the active pointer."
+            ),
+        )
+
+    if (
+        payload.release_id
+        == previous_release_id
+    ):
+        return {
+            "status": "unchanged",
+            "release_id": (
+                previous_release_id
+            ),
+            "previous_release_id": (
+                previous_release_id
+            ),
+        }
+
+    pointer_changed = False
+
+    try:
+        # Load and validate everything before changing either active state.
+        candidate_bundle = (
+            load_serving_bundle_for_release(
+                release_id=(
+                    payload.release_id
+                ),
+                model_name=MODEL_NAME,
+                cfg=CFG,
+                models_path=MODELS_PATH,
+            )
+        )
+
+        activate_release_pointer(
+            models_path=MODELS_PATH,
+            release_id=(
+                payload.release_id
+            ),
+            operation="rollback",
+            previous_release_id=(
+                previous_release_id
+            ),
+        )
+        pointer_changed = True
+
+        result = activate_serving_bundle(
+            candidate_bundle
+        )
+
+    except Exception as error:
+        if pointer_changed:
+            try:
+                activate_release_pointer(
+                    models_path=MODELS_PATH,
+                    release_id=(
+                        previous_release_id
+                    ),
+                    operation=(
+                        "rollback_reverted"
+                    ),
+                    previous_release_id=(
+                        payload.release_id
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "CRITICAL: rollback pointer "
+                    "could not be restored | "
+                    "expected_release_id=%s",
+                    previous_release_id,
+                )
+
+        logger.exception(
+            "Serving release rollback failed | "
+            "target_release_id=%s | "
+            "previous_release_id=%s",
+            payload.release_id,
+            previous_release_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Serving release rollback failed. "
+                f"Reason: {error}"
+            ),
+        ) from error
+
+    logger.warning(
+        "Serving release rollback completed | "
+        "previous_release_id=%s | "
+        "active_release_id=%s",
+        previous_release_id,
+        candidate_bundle.release_id,
+    )
+
+    return {
+        "status": "rolled_back",
+        "previous_release_id": (
+            previous_release_id
+        ),
         **result,
     }
 

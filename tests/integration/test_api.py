@@ -379,3 +379,148 @@ def test_failed_bundle_reload_keeps_previous_serving_state(
         api_app.active_serving_bundle
         is previous_bundle
     )
+
+def test_rollback_serving_release(
+    api_client,
+    api_headers,
+    mock_xgb_model,
+):
+    from src.api import app as api_app
+
+    previous_bundle = build_test_bundle(
+        model=mock_xgb_model,
+        release_id="release-new",
+        model_version="8",
+        model_run_id="run-8",
+    )
+
+    rollback_bundle = build_test_bundle(
+        model=mock_xgb_model,
+        release_id="release-old",
+        model_version="7",
+        model_run_id="run-7",
+    )
+
+    api_app.active_serving_bundle = (
+        previous_bundle
+    )
+
+    with (
+        patch(
+            "src.api.app."
+            "load_active_release_id",
+            return_value="release-new",
+        ),
+        patch(
+            "src.api.app."
+            "load_serving_bundle_for_release",
+            return_value=rollback_bundle,
+        ) as load_bundle,
+        patch(
+            "src.api.app."
+            "activate_release_pointer",
+        ) as activate_pointer,
+    ):
+        response = api_client.post(
+            (
+                "/admin/"
+                "rollback-serving-release"
+            ),
+            json={
+                "release_id": "release-old",
+            },
+            headers=api_headers,
+        )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["status"] == (
+        "rolled_back"
+    )
+    assert body["release_id"] == (
+        "release-old"
+    )
+    assert body["previous_release_id"] == (
+        "release-new"
+    )
+    assert body["model_version"] == "7"
+
+    assert (
+        api_app.active_serving_bundle
+        is rollback_bundle
+    )
+
+    load_bundle.assert_called_once_with(
+        release_id="release-old",
+        model_name=api_app.MODEL_NAME,
+        cfg=api_app.CFG,
+        models_path=api_app.MODELS_PATH,
+    )
+
+    activate_pointer.assert_called_once_with(
+        models_path=api_app.MODELS_PATH,
+        release_id="release-old",
+        operation="rollback",
+        previous_release_id=(
+            "release-new"
+        ),
+    )
+
+
+def test_failed_rollback_keeps_previous_bundle(
+    api_client,
+    api_headers,
+    mock_xgb_model,
+):
+    from src.api import app as api_app
+
+    previous_bundle = build_test_bundle(
+        model=mock_xgb_model,
+        release_id="release-new",
+        model_version="8",
+        model_run_id="run-8",
+    )
+
+    api_app.active_serving_bundle = (
+        previous_bundle
+    )
+
+    with (
+        patch(
+            "src.api.app."
+            "load_active_release_id",
+            return_value="release-new",
+        ),
+        patch(
+            "src.api.app."
+            "load_serving_bundle_for_release",
+            side_effect=ValueError(
+                "Rollback release is invalid."
+            ),
+        ),
+        patch(
+            "src.api.app."
+            "activate_release_pointer",
+        ) as activate_pointer,
+    ):
+        response = api_client.post(
+            (
+                "/admin/"
+                "rollback-serving-release"
+            ),
+            json={
+                "release_id": "release-old",
+            },
+            headers=api_headers,
+        )
+
+    assert response.status_code == 500
+
+    assert (
+        api_app.active_serving_bundle
+        is previous_bundle
+    )
+
+    activate_pointer.assert_not_called()
