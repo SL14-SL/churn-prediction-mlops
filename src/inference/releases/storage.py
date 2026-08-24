@@ -119,24 +119,16 @@ def build_release_paths(
             release_root,
             MANIFEST_FILE_NAME,
         ),
-        "store_metadata": join_uri(
+        "feature_schema": join_uri(
             release_root,
-            "store.parquet",
-        ),
-        "store_state": join_uri(
-            release_root,
-            "latest_state.json",
-        ),
-        "known_calendar": join_uri(
-            release_root,
-            "known_calendar.parquet",
-        ),
-        "active_pointer": join_uri(
-            models_path,
-            ACTIVE_RELEASE_FILE_NAME,
+            "feature_schema.json",
         ),
         "prediction_probe": join_uri(
             release_root,
             "prediction_probe.json",
+        ),
+        "active_pointer": join_uri(
+            models_path,
+            ACTIVE_RELEASE_FILE_NAME,
         ),
     }
