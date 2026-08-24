@@ -5,6 +5,8 @@ import shutil
 import logging
 import warnings
 import os
+import hashlib
+import json
 
 from datetime import datetime
 
@@ -38,10 +40,14 @@ from src.training.policy import should_refresh_api, should_skip_training, get_ru
 
 from src.monitoring.feature_drift import run_feature_drift_check
 
+from src.deployment.prediction_probe import build_prediction_probe
+from src.inference.releases.publisher import publish_serving_release
+
 from src.utils.logger import get_logger
 
 # --- INITIALIZE CONFIGURATION ---
 GCP_CFG = load_config("gcp.yaml")
+TRAIN_CFG = load_config("training.yaml")
 MODEL_NAME = ENV_CFG["model"]["registry_name"]
 logger = get_logger(__name__)
 
@@ -53,6 +59,34 @@ logging.getLogger("alembic").setLevel(logging.ERROR)
 tracking_uri = ENV_CFG["tracking"]["mlflow_tracking_uri"]
 mlflow.set_tracking_uri(tracking_uri)
 logger.info(f"Using MLflow tracking URI: {tracking_uri}")
+
+def build_config_hash(
+    dataset_manifest: dict,
+) -> str | None:
+    """
+    Build a deterministic hash of the effective training configuration.
+    """
+    effective_config = (
+        dataset_manifest.get(
+            "effective_config"
+        )
+    )
+
+    if effective_config is None:
+        return None
+
+    serialized = json.dumps(
+        effective_config,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+    return hashlib.sha256(
+        serialized.encode("utf-8")
+    ).hexdigest()
+
+
 
 @task(name="Check Feature Drift")
 def task_check_drift() -> bool:
@@ -134,24 +168,172 @@ def task_train():
     return run_id
 
 @task(name="Evaluation & Registration")
-def task_eval_and_reg(new_run_id: str):
+def task_eval_and_reg(
+    new_run_id: str,
+) -> dict:
+    """
+    Compare, register, and return immutable registry metadata.
+
+    A promoted model version is later used to build the serving release.
+    """
     p_logger = get_run_logger()
-    is_better, metrics = compare_models(new_run_id)
 
-    if metrics and "challenger_f1" in metrics:
-        print(f"Challenger F1: {metrics['challenger_f1']}")
+    is_better, metrics = (
+        compare_models(
+            new_run_id
+        )
+    )
 
-    if metrics and "champion_f1" in metrics:
-        print(f"Champion F1: {metrics['champion_f1']}")
+    metrics = metrics or {}
+
+    if "challenger_f1" in metrics:
+        print(
+            "Challenger F1: "
+            f"{metrics['challenger_f1']}"
+        )
+
+    if "champion_f1" in metrics:
+        print(
+            "Champion F1: "
+            f"{metrics['champion_f1']}"
+        )
+
+    alias = (
+        "champion"
+        if is_better
+        else "challenger"
+    )
 
     if is_better:
-        p_logger.info(f"Challenger (Run: {new_run_id}) outperforms Champion. Promoting...")
-        register_model(new_run_id, alias="champion")
-        return True
+        p_logger.info(
+            "Challenger (run=%s) outperforms "
+            "Champion. Promoting.",
+            new_run_id,
+        )
     else:
-        p_logger.info("Champion remains superior. Registering new model as Challenger.")
-        register_model(new_run_id, alias="challenger")
-        return False
+        p_logger.info(
+            "Champion remains superior. "
+            "Registering new model as Challenger."
+        )
+
+    registered_version = register_model(
+        new_run_id,
+        alias=alias,
+    )
+
+    return {
+        "promoted": bool(is_better),
+        "alias": alias,
+        "model_version": str(
+            registered_version.version
+        ),
+        "model_run_id": new_run_id,
+        "model_type": TRAIN_CFG[
+            "model"
+        ]["type"],
+        "decision_threshold": float(
+            metrics.get(
+                "challenger_decision_threshold",
+                0.5,
+            )
+        ),
+        "metrics": metrics,
+    }
+
+@task(name="Publish Serving Release")
+def task_publish_serving_release(
+    *,
+    registration_result: dict,
+    dataset_manifest: dict,
+):
+    """
+    Publish and activate the complete churn serving release.
+    """
+    p_logger = get_run_logger()
+
+    if not registration_result.get(
+        "promoted",
+        False,
+    ):
+        raise ValueError(
+            "Cannot publish a serving release "
+            "for a non-promoted model."
+        )
+
+    models_path = get_path(
+        "models"
+    )
+    validated_path = get_path(
+        "validated_data"
+    )
+
+    feature_schema_source = (
+        f"{models_path}/feature_schema.json"
+    )
+    validated_data_path = (
+        f"{validated_path}/train.parquet"
+    )
+
+    prediction_probe = (
+        build_prediction_probe(
+            validated_data_path=(
+                validated_data_path
+            ),
+        )
+    )
+
+    manifest = publish_serving_release(
+        models_path=models_path,
+        model_name=MODEL_NAME,
+        model_version=(
+            registration_result[
+                "model_version"
+            ]
+        ),
+        model_run_id=(
+            registration_result[
+                "model_run_id"
+            ]
+        ),
+        model_type=(
+            registration_result[
+                "model_type"
+            ]
+        ),
+        decision_threshold=(
+            registration_result[
+                "decision_threshold"
+            ]
+        ),
+        dataset_version=(
+            dataset_manifest.get(
+                "dataset_version"
+            )
+        ),
+        config_hash=build_config_hash(
+            dataset_manifest
+        ),
+        git_commit=(
+            dataset_manifest.get(
+                "git_commit"
+            )
+        ),
+        feature_schema_source=(
+            feature_schema_source
+        ),
+        prediction_probe_payload=(
+            prediction_probe
+        ),
+    )
+
+    p_logger.info(
+        "Serving release published: "
+        "release_id=%s model_version=%s",
+        manifest.release_id,
+        manifest.model_version,
+    )
+
+    return manifest.to_dict()
 
 
 @task(name="Archive Logs")
@@ -287,19 +469,66 @@ def training_pipeline(force_run: bool = False):
 
     #task_archive_logs() 
 
-    new_champion_crowned = task_eval_and_reg(run_id)
-    if should_refresh_api(new_champion_crowned):
-        p_logger.info("🚀 New Champion detected. Refreshing API...")
+    registration_result = (
+        task_eval_and_reg(
+            run_id
+        )
+    )
+
+    release_manifest = None
+
+    if should_refresh_api(
+        registration_result["promoted"]
+    ):
+        p_logger.info(
+            "New Champion detected. "
+            "Publishing serving release."
+        )
+
+        release_manifest = (
+            task_publish_serving_release(
+                registration_result=(
+                    registration_result
+                ),
+                dataset_manifest=(
+                    dataset_manifest
+                ),
+            )
+        )
+
+        p_logger.info(
+            "Serving release published. "
+            "Refreshing API."
+        )
+
         task_refresh_api()
         task_verify_health()
     else:
-        p_logger.info("✅ No API refresh needed. Current Champion is still the best.")
-
+        p_logger.info(
+            "No API refresh needed. "
+            "Current Champion remains active."
+        )
     p_logger.info("Pipeline execution finished successfully.")
 
     return {
         "run_id": run_id,
-        "champion_promoted": bool(new_champion_crowned),
+        "champion_promoted": bool(
+            registration_result[
+                "promoted"
+            ]
+        ),
+        "model_version": (
+            registration_result[
+                "model_version"
+            ]
+        ),
+        "serving_release_id": (
+            release_manifest[
+                "release_id"
+            ]
+            if release_manifest
+            else None
+        ),
     }
 
 if __name__ == "__main__":
