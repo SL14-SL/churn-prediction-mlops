@@ -292,21 +292,23 @@ def readyz():
 
     return {
         "status": "ready",
+        "serving_bundle_loaded": True,
+        "release_id": bundle.release_id,
         "model_name": bundle.model_name,
         "model_type": bundle.model_type,
-        "serving_alias": (
-            bundle.serving_alias
-        ),
-        "model_version": (
-            bundle.model_version
-        ),
-        "model_run_id": (
-            bundle.model_run_id
-        ),
+        "serving_alias": bundle.serving_alias,
+        "model_version": bundle.model_version,
+        "model_run_id": bundle.model_run_id,
         "model_uri": bundle.model_uri,
         "decision_threshold": (
             bundle.decision_threshold
         ),
+        "feature_schema_loaded": bool(
+            bundle.feature_schema.get(
+                "columns"
+            )
+        ),
+        "decision_threshold_loaded": True,
     }
 
 @app.post("/explain", dependencies=[Depends(get_api_key)])
@@ -406,6 +408,9 @@ def predict(payload: PredictionRequest):
                 "request_id": output["request_id"],
                 "timing_ms": output["timings"],
                 "data_quality": output["dq_summary"],
+                "release_id": bundle.release_id,
+                "model_version": bundle.model_version,
+                "model_run_id": bundle.model_run_id,
             },
         }
 

@@ -251,6 +251,15 @@ def test_predict_endpoint_success(
         body["metadata"]["request_id"]
         == "test-request"
     )
+    assert body["metadata"]["release_id"] == (
+        "test-release"
+    )
+    assert body["metadata"]["model_version"] == (
+        "test-version"
+    )
+    assert body["metadata"]["model_run_id"] == (
+        "test-run-id"
+    )
 
 
 def test_predict_endpoint_requires_api_key(
@@ -313,6 +322,10 @@ def test_readyz_endpoint(
         body["decision_threshold"]
         == 0.5
     )
+    assert body["serving_bundle_loaded"] is True
+    assert body["release_id"] == "test-release"
+    assert body["feature_schema_loaded"] is True
+    assert body["decision_threshold_loaded"] is True
 
 
 def test_livez_endpoint(
