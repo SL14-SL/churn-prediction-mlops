@@ -1,22 +1,82 @@
 import pytest
 
 from src.inference.serving_bundle import (
-    ServingBundle,
     ServingArtifactReference,
+    ServingBundle,
     ServingReleaseManifest,
     validate_serving_bundle,
     validate_serving_manifest,
 )
 
 
+def build_valid_manifest(
+    **overrides,
+) -> ServingReleaseManifest:
+    values = {
+        "schema_version": 1,
+        "release_id": "churn-release-1",
+        "created_at_utc": (
+            "2026-08-24T12:00:00+00:00"
+        ),
+        "model_name": (
+            "customer-churn-model-dev"
+        ),
+        "model_version": "7",
+        "model_run_id": "run-7",
+        "model_uri": (
+            "models:/"
+            "customer-churn-model-dev/7"
+        ),
+        "model_type": "xgboost",
+        "decision_threshold": 0.42,
+        "dataset_version": "dataset-1",
+        "config_hash": "config-hash",
+        "git_commit": "abc123",
+        "feature_schema": (
+            ServingArtifactReference(
+                path="feature_schema.json",
+                sha256=(
+                    "feature-schema-hash"
+                ),
+            )
+        ),
+        "prediction_probe": (
+            ServingArtifactReference(
+                path="prediction_probe.json",
+                sha256=(
+                    "prediction-probe-hash"
+                ),
+            )
+        ),
+    }
+
+    values.update(overrides)
+
+    return ServingReleaseManifest(
+        **values
+    )
+
+
 def build_valid_bundle(
     **overrides,
 ) -> ServingBundle:
+    manifest = build_valid_manifest()
+
     values = {
+        "release_id": (
+            manifest.release_id
+        ),
+        "manifest": manifest,
         "model": object(),
-        "model_name": "customer-churn-model-dev",
-        "model_type": "xgboost",
-        "decision_threshold": 0.42,
+        "model_name": (
+            manifest.model_name
+        ),
+        "model_type": (
+            manifest.model_type
+        ),
+        "decision_threshold": (
+            manifest.decision_threshold
+        ),
         "feature_schema": {
             "columns": [
                 "tenure",
@@ -29,26 +89,39 @@ def build_valid_bundle(
         },
         "serving_alias": "champion",
         "model_uri": (
-            "models:/customer-churn-model-dev@champion"
+            manifest.model_uri
         ),
-        "model_version": "3",
-        "model_run_id": "run-3",
+        "model_version": (
+            manifest.model_version
+        ),
+        "model_run_id": (
+            manifest.model_run_id
+        ),
     }
 
     values.update(overrides)
 
-    return ServingBundle(**values)
+    return ServingBundle(
+        **values
+    )
 
 
 def test_valid_serving_bundle_passes_validation():
     bundle = build_valid_bundle()
 
-    validate_serving_bundle(bundle)
+    validate_serving_bundle(
+        bundle
+    )
 
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
+        (
+            "release_id",
+            "",
+            "Serving bundle has no release ID",
+        ),
         (
             "model",
             None,
@@ -84,12 +157,17 @@ def test_incomplete_serving_bundle_fails_validation(
         ValueError,
         match=message,
     ):
-        validate_serving_bundle(bundle)
+        validate_serving_bundle(
+            bundle
+        )
 
 
 @pytest.mark.parametrize(
     "threshold",
-    [-0.01, 1.01],
+    [
+        -0.01,
+        1.01,
+    ],
 )
 def test_invalid_decision_threshold_fails_validation(
     threshold,
@@ -102,7 +180,9 @@ def test_invalid_decision_threshold_fails_validation(
         ValueError,
         match="between 0 and 1",
     ):
-        validate_serving_bundle(bundle)
+        validate_serving_bundle(
+            bundle
+        )
 
 
 def test_empty_feature_columns_fail_validation():
@@ -117,7 +197,9 @@ def test_empty_feature_columns_fail_validation():
         ValueError,
         match="feature schema has no columns",
     ):
-        validate_serving_bundle(bundle)
+        validate_serving_bundle(
+            bundle
+        )
 
 
 def test_duplicate_feature_columns_fail_validation():
@@ -137,7 +219,9 @@ def test_duplicate_feature_columns_fail_validation():
         ValueError,
         match="duplicate columns",
     ):
-        validate_serving_bundle(bundle)
+        validate_serving_bundle(
+            bundle
+        )
 
 
 def test_dtype_for_unknown_feature_fails_validation():
@@ -148,7 +232,9 @@ def test_dtype_for_unknown_feature_fails_validation():
             ],
             "dtypes": {
                 "tenure": "float64",
-                "unknown_feature": "float64",
+                "unknown_feature": (
+                    "float64"
+                ),
             },
         },
     )
@@ -157,56 +243,84 @@ def test_dtype_for_unknown_feature_fails_validation():
         ValueError,
         match="dtypes for unknown columns",
     ):
-        validate_serving_bundle(bundle)
+        validate_serving_bundle(
+            bundle
+        )
 
-def build_valid_manifest(
-    **overrides,
-) -> ServingReleaseManifest:
-    values = {
-        "schema_version": 1,
-        "release_id": "churn-release-1",
-        "created_at_utc": (
-            "2026-08-24T12:00:00+00:00"
-        ),
-        "model_name": (
-            "customer-churn-model-dev"
-        ),
-        "model_version": "7",
-        "model_run_id": "run-7",
-        "model_uri": (
-            "models:/"
-            "customer-churn-model-dev/7"
-        ),
-        "model_type": "xgboost",
-        "decision_threshold": 0.42,
-        "dataset_version": "dataset-1",
-        "config_hash": "config-hash",
-        "git_commit": "abc123",
-        "feature_schema": (
-            ServingArtifactReference(
-                path="feature_schema.json",
-                sha256="feature-schema-hash",
-            )
-        ),
-        "prediction_probe": (
-            ServingArtifactReference(
-                path="prediction_probe.json",
-                sha256="prediction-probe-hash",
-            )
-        ),
-    }
 
-    values.update(overrides)
-
-    return ServingReleaseManifest(
-        **values
+@pytest.mark.parametrize(
+    (
+        "bundle_field",
+        "bundle_value",
+        "message",
+    ),
+    [
+        (
+            "release_id",
+            "different-release",
+            "release ID does not match manifest",
+        ),
+        (
+            "model_name",
+            "different-model",
+            "model name does not match manifest",
+        ),
+        (
+            "model_version",
+            "99",
+            "model version does not match manifest",
+        ),
+        (
+            "model_run_id",
+            "different-run",
+            "model run ID does not match manifest",
+        ),
+        (
+            "model_uri",
+            "models:/different-model/99",
+            "model URI does not match manifest",
+        ),
+        (
+            "model_type",
+            "random_forest",
+            "model type does not match manifest",
+        ),
+        (
+            "decision_threshold",
+            0.5,
+            (
+                "decision threshold does not "
+                "match manifest"
+            ),
+        ),
+    ],
+)
+def test_bundle_metadata_must_match_manifest(
+    bundle_field,
+    bundle_value,
+    message,
+):
+    bundle = build_valid_bundle(
+        **{
+            bundle_field: bundle_value,
+        }
     )
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        validate_serving_bundle(
+            bundle
+        )
 
 
 def test_valid_serving_manifest_passes_validation():
     manifest = build_valid_manifest()
 
-    validate_serving_manifest(manifest)
+    validate_serving_manifest(
+        manifest
+    )
 
 
 def test_serving_manifest_serializes_to_dict():
@@ -218,11 +332,16 @@ def test_serving_manifest_serializes_to_dict():
         "churn-release-1"
     )
     assert payload["model_version"] == "7"
-    assert payload["decision_threshold"] == 0.42
+    assert (
+        payload["decision_threshold"]
+        == 0.42
+    )
+
     assert payload["feature_schema"] == {
         "path": "feature_schema.json",
         "sha256": "feature-schema-hash",
     }
+
     assert payload["prediction_probe"] == {
         "path": "prediction_probe.json",
         "sha256": "prediction-probe-hash",
@@ -291,7 +410,9 @@ def test_manifest_rejects_missing_feature_schema_path():
         feature_schema=(
             ServingArtifactReference(
                 path="",
-                sha256="feature-schema-hash",
+                sha256=(
+                    "feature-schema-hash"
+                ),
             )
         ),
     )

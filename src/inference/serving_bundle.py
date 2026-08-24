@@ -156,6 +156,8 @@ class ServingBundle:
     A bundle is created completely before it replaces the currently
     active serving state.
     """
+    release_id: str 
+    manifest: ServingReleaseManifest
 
     model: Any
     model_name: str
@@ -176,6 +178,23 @@ def validate_serving_bundle(
     """
     Raise ValueError if a churn serving bundle is incomplete or invalid.
     """
+    if not bundle.release_id:
+        raise ValueError(
+            "Serving bundle has no release ID."
+        )
+
+    if not isinstance(
+        bundle.manifest,
+        ServingReleaseManifest,
+    ):
+        raise ValueError(
+            "Serving bundle has no valid manifest."
+        )
+
+    validate_serving_manifest(
+        bundle.manifest
+    )
+
     if bundle.model is None:
         raise ValueError(
             "Serving bundle has no model."
@@ -275,4 +294,71 @@ def validate_serving_bundle(
             "Serving bundle feature schema contains dtypes "
             "for unknown columns: "
             f"{sorted(unknown_dtype_columns)}."
+        )
+
+    if (
+        bundle.manifest.release_id
+        != bundle.release_id
+    ):
+        raise ValueError(
+            "Serving bundle release ID does not "
+            "match manifest."
+        )
+
+    if (
+        bundle.manifest.model_name
+        != bundle.model_name
+    ):
+        raise ValueError(
+            "Serving bundle model name does not "
+            "match manifest."
+        )
+
+    if (
+        bundle.manifest.model_version
+        != bundle.model_version
+    ):
+        raise ValueError(
+            "Serving bundle model version does not "
+            "match manifest."
+        )
+
+    if (
+        bundle.manifest.model_run_id
+        != bundle.model_run_id
+    ):
+        raise ValueError(
+            "Serving bundle model run ID does not "
+            "match manifest."
+        )
+
+    if (
+        bundle.manifest.model_uri
+        != bundle.model_uri
+    ):
+        raise ValueError(
+            "Serving bundle model URI does not "
+            "match manifest."
+        )
+
+    if (
+        bundle.manifest.model_type
+        != bundle.model_type
+    ):
+        raise ValueError(
+            "Serving bundle model type does not "
+            "match manifest."
+        )
+
+    if (
+        float(
+            bundle.manifest.decision_threshold
+        )
+        != float(
+            bundle.decision_threshold
+        )
+    ):
+        raise ValueError(
+            "Serving bundle decision threshold "
+            "does not match manifest."
         )

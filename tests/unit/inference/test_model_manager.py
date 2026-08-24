@@ -5,20 +5,53 @@ from unittest.mock import (
 
 import pytest
 
-from src.inference.serving_bundle import (
-    ServingBundle,
-)
 from src.inference.model_manager import (
+    load_serving_bundle_for_release,
     reload_serving_model,
 )
+from src.inference.serving_bundle import (
+    ServingArtifactReference,
+    ServingBundle,
+    ServingReleaseManifest,
+)
 
 
-def test_reload_serving_model_returns_valid_bundle():
-    model = MagicMock()
-    model_version = MagicMock(
-        version="7",
-        run_id="run-7",
+def build_manifest(
+    *,
+    model_name: str = (
+        "customer-churn-model-dev"
+    ),
+) -> ServingReleaseManifest:
+    return ServingReleaseManifest(
+        schema_version=1,
+        release_id="release-7",
+        created_at_utc=(
+            "2026-08-24T12:00:00+00:00"
+        ),
+        model_name=model_name,
+        model_version="7",
+        model_run_id="run-7",
+        model_uri=(
+            f"models:/{model_name}/7"
+        ),
+        model_type="xgboost",
+        decision_threshold=0.42,
+        dataset_version="dataset-1",
+        config_hash="config-hash",
+        git_commit="abc123",
+        feature_schema=(
+            ServingArtifactReference(
+                path="feature_schema.json",
+                sha256="schema-hash",
+            )
+        ),
+        prediction_probe=None,
     )
+
+
+def test_load_serving_bundle_for_release():
+    manifest = build_manifest()
+    model = MagicMock()
 
     feature_schema = {
         "columns": [
@@ -34,59 +67,65 @@ def test_reload_serving_model_returns_valid_bundle():
     with (
         patch(
             "src.inference.model_manager."
-            "resolve_tracking_uri",
-            return_value="http://mlflow:5000",
-        ),
-        patch(
-            "src.inference.model_manager."
             "mlflow.set_tracking_uri",
-        ) as set_tracking_uri,
+        ),
         patch(
             "src.inference.model_manager."
-            "load_registry_model",
+            "load_serving_manifest",
             return_value=(
-                model,
-                "xgboost",
-                "champion",
+                manifest,
                 (
-                    "models:/"
-                    "customer-churn-model-dev"
-                    "@champion"
+                    "models/serving_releases/"
+                    "release-7"
                 ),
-                0.42,
             ),
         ),
         patch(
             "src.inference.model_manager."
-            "MlflowClient",
-        ) as client_class,
+            "resolve_release_artifact_uri",
+            return_value=(
+                "models/serving_releases/"
+                "release-7/"
+                "feature_schema.json"
+            ),
+        ) as resolve_artifact,
         patch(
             "src.inference.model_manager."
-            "load_feature_schema_from_mlflow",
+            "load_json",
             return_value=feature_schema,
-        ) as load_schema,
+        ),
+        patch(
+            "src.inference.model_manager."
+            "load_model_by_type",
+            return_value=model,
+        ) as load_model,
     ):
-        client_class.return_value\
-            .get_model_version_by_alias\
-            .return_value = model_version
-
-        bundle = reload_serving_model(
-            model_name=(
-                "customer-churn-model-dev"
-            ),
-            cfg={},
+        bundle = (
+            load_serving_bundle_for_release(
+                release_id="release-7",
+                model_name=(
+                    "customer-churn-model-dev"
+                ),
+                cfg={
+                    "tracking": {
+                        "mlflow_tracking_uri": (
+                            "http://mlflow:5000"
+                        ),
+                    },
+                },
+                models_path="models",
+            )
         )
 
     assert isinstance(
         bundle,
         ServingBundle,
     )
-    assert bundle.model is model
-    assert bundle.model_name == (
-        "customer-churn-model-dev"
+    assert bundle.release_id == (
+        "release-7"
     )
-    assert bundle.model_type == "xgboost"
-    assert bundle.serving_alias == "champion"
+    assert bundle.manifest is manifest
+    assert bundle.model is model
     assert bundle.model_version == "7"
     assert bundle.model_run_id == "run-7"
     assert bundle.decision_threshold == 0.42
@@ -94,132 +133,128 @@ def test_reload_serving_model_returns_valid_bundle():
         feature_schema
     )
 
-    set_tracking_uri.assert_called_once_with(
-        "http://mlflow:5000"
+    resolve_artifact.assert_called_once_with(
+        release_root=(
+            "models/serving_releases/"
+            "release-7"
+        ),
+        reference=(
+            manifest.feature_schema
+        ),
     )
-    load_schema.assert_called_once_with(
-        run_id="run-7",
-        fallback_to_local=True,
+
+    load_model.assert_called_once_with(
+        (
+            "models:/"
+            "customer-churn-model-dev/7"
+        ),
+        "xgboost",
     )
 
 
-def test_reload_rejects_invalid_feature_schema():
-    model_version = MagicMock(
-        version="7",
-        run_id="run-7",
+def test_load_release_rejects_wrong_model_name():
+    manifest = build_manifest(
+        model_name="wrong-model"
     )
 
     with (
-        patch(
-            "src.inference.model_manager."
-            "resolve_tracking_uri",
-            return_value="http://mlflow:5000",
-        ),
         patch(
             "src.inference.model_manager."
             "mlflow.set_tracking_uri",
         ),
         patch(
             "src.inference.model_manager."
-            "load_registry_model",
+            "load_serving_manifest",
             return_value=(
-                MagicMock(),
-                "xgboost",
-                "champion",
-                (
-                    "models:/"
-                    "customer-churn-model-dev"
-                    "@champion"
-                ),
-                0.42,
+                manifest,
+                "models/release-7",
             ),
         ),
-        patch(
-            "src.inference.model_manager."
-            "MlflowClient",
-        ) as client_class,
-        patch(
-            "src.inference.model_manager."
-            "load_feature_schema_from_mlflow",
-            return_value={
-                "columns": [],
-                "dtypes": {},
-            },
-        ),
     ):
-        client_class.return_value\
-            .get_model_version_by_alias\
-            .return_value = model_version
-
         with pytest.raises(
             ValueError,
-            match="feature schema has no columns",
+            match=(
+                "does not match configuration"
+            ),
         ):
-            reload_serving_model(
+            load_serving_bundle_for_release(
+                release_id="release-7",
                 model_name=(
                     "customer-churn-model-dev"
                 ),
                 cfg={},
+                models_path="models",
             )
 
 
-def test_reload_rejects_invalid_threshold():
-    model_version = MagicMock(
-        version="7",
-        run_id="run-7",
+def test_reload_uses_active_release():
+    manifest = build_manifest()
+    expected_bundle = MagicMock(
+        spec=ServingBundle
     )
+
+    cfg = {
+        "paths": {
+            "models": "models",
+        },
+        "tracking": {
+            "mlflow_tracking_uri": (
+                "http://mlflow:5000"
+            ),
+        },
+    }
 
     with (
         patch(
             "src.inference.model_manager."
-            "resolve_tracking_uri",
-            return_value="http://mlflow:5000",
-        ),
-        patch(
-            "src.inference.model_manager."
-            "mlflow.set_tracking_uri",
-        ),
-        patch(
-            "src.inference.model_manager."
-            "load_registry_model",
+            "load_active_serving_manifest",
             return_value=(
-                MagicMock(),
-                "xgboost",
-                "champion",
+                manifest,
                 (
-                    "models:/"
-                    "customer-churn-model-dev"
-                    "@champion"
+                    "models/serving_releases/"
+                    "release-7"
                 ),
-                1.5,
             ),
-        ),
+        ) as load_active,
         patch(
             "src.inference.model_manager."
-            "MlflowClient",
-        ) as client_class,
-        patch(
-            "src.inference.model_manager."
-            "load_feature_schema_from_mlflow",
-            return_value={
-                "columns": ["tenure"],
-                "dtypes": {
-                    "tenure": "float64",
-                },
-            },
-        ),
+            "load_serving_bundle_for_release",
+            return_value=expected_bundle,
+        ) as load_bundle,
     ):
-        client_class.return_value\
-            .get_model_version_by_alias\
-            .return_value = model_version
+        result = reload_serving_model(
+            model_name=(
+                "customer-churn-model-dev"
+            ),
+            cfg=cfg,
+        )
 
-        with pytest.raises(
-            ValueError,
-            match="between 0 and 1",
-        ):
-            reload_serving_model(
-                model_name=(
-                    "customer-churn-model-dev"
-                ),
-                cfg={},
-            )
+    assert result is expected_bundle
+
+    load_active.assert_called_once_with(
+        models_path="models",
+    )
+
+    load_bundle.assert_called_once_with(
+        release_id="release-7",
+        model_name=(
+            "customer-churn-model-dev"
+        ),
+        cfg=cfg,
+        models_path="models",
+    )
+
+
+def test_reload_rejects_missing_models_path():
+    with pytest.raises(
+        ValueError,
+        match="no models path",
+    ):
+        reload_serving_model(
+            model_name=(
+                "customer-churn-model-dev"
+            ),
+            cfg={
+                "paths": {},
+            },
+        )
