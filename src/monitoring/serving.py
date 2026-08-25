@@ -7,7 +7,7 @@ from time import time
 from typing import Iterable
 
 from prometheus_client import Counter as PromCounter
-from prometheus_client import Histogram
+from prometheus_client import Histogram, Gauge
 
 DEFAULT_LATENCY_BUCKETS_SECONDS = (
     0.005,
@@ -20,6 +20,14 @@ DEFAULT_LATENCY_BUCKETS_SECONDS = (
     1.000,
     3.000,
     5.000,
+)
+
+SERVING_READY = Gauge(
+    "api_serving_ready",
+    (
+        "Whether a complete serving bundle "
+        "is currently active"
+    ),
 )
 
 REQUEST_COUNT = PromCounter(
@@ -144,3 +152,13 @@ def get_summary(window_seconds: int = 900) -> dict:
         "status_codes": dict(status_counts),
         "paths": dict(path_counts),
     }
+
+def set_serving_readiness(
+    is_ready: bool,
+) -> None:
+    """
+    Update the current serving-readiness state.
+    """
+    SERVING_READY.set(
+        1 if is_ready else 0
+    )

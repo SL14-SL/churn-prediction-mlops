@@ -31,8 +31,12 @@ from src.monitoring.data_quality import (
     build_reference_category_cache, 
 )
 from src.monitoring.config import get_serving_settings, get_data_quality_settings
-from src.monitoring.serving import normalize_path, observe_request, should_ignore_path
-
+from src.monitoring.serving import (
+    normalize_path,
+    observe_request,
+    set_serving_readiness,
+    should_ignore_path,
+)
 from src.data.features.build_features import build_features
 
 from src.inference.pipeline import (
@@ -99,11 +103,10 @@ def activate_serving_bundle(
     """
     global active_serving_bundle
 
-    validate_serving_bundle(
-        bundle
-    )
+    validate_serving_bundle(bundle)
 
     active_serving_bundle = bundle
+    set_serving_readiness(True)
 
     return {
         "release_id": bundle.release_id,
@@ -189,12 +192,21 @@ async def lifespan(app: FastAPI):
                 active_serving_bundle.model_version,
             )
         except Exception as model_err:
-            logger.error(f"❌ Failed to load model from registry: {model_err}")
+            logger.error(
+                "Failed to load model from registry: "
+                f"{model_err}"
+            )
             active_serving_bundle = None
+            set_serving_readiness(False)
 
         yield
+
     finally:
-        logger.info("Shutdown: Cleaning up resources.")
+        set_serving_readiness(False)
+        logger.info(
+            "Shutdown: Cleaning up resources."
+        )
+        
 
 app = FastAPI(
     title="Churn Prediction API", 

@@ -94,12 +94,69 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - "9090:9090"
     depends_on:
       - api
+      - alertmanager
     networks:
       - mlops-net
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: churn-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - mlops-net
+    restart: unless-stopped
+
+  alert-receiver:
+    build: .
+    user: "${UID}:${GID}"
+    command:
+      - uv
+      - run
+      - --no-sync
+      - uvicorn
+      - src.monitoring.alert_receiver:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+    environment:
+      PYTHONPATH: /app
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      UV_NO_SYNC: "1"
+      UV_CACHE_DIR: /tmp/.uv_cache
+      PYTHONPYCACHEPREFIX: /tmp/pycache
+    volumes:
+      - ./src:/app/src
+    networks:
+      - mlops-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://localhost:8090/livez',
+          timeout=3
+          )
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   grafana:
     image: grafana/grafana:latest
@@ -114,3 +171,6 @@ services:
 networks:
   mlops-net:
     driver: bridge
+    
+volumes:
+  alertmanager-data:

@@ -1,0 +1,102 @@
+groups:
+  - name: churn-api-slo
+    rules:
+      - alert: ChurnAPIUnavailable
+        expr: up{job="churn-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: churn-api
+        annotations:
+          summary: Churn API is unavailable
+          description: >-
+            Prometheus could not scrape the churn API
+            for at least one minute.
+
+      - alert: ChurnServingBundleNotReady
+        expr: |
+          (api_serving_ready == 0)
+          or
+          absent(api_serving_ready)
+        for: 2m
+        labels:
+          severity: critical
+          service: churn-api
+        annotations:
+          summary: No complete serving bundle is active
+          description: >-
+            The API process is reachable, but no complete
+            model and artifact bundle is ready for serving.
+
+      - alert: ChurnPredictionServerErrorRateHigh
+        expr: |
+          (
+            sum(
+              increase(
+                api_response_status_total{
+                  path="/predict",
+                  status_code=~"5.."
+                }[10m]
+              )
+            )
+            /
+            clamp_min(
+              sum(
+                increase(
+                  api_request_count_total{
+                    path="/predict"
+                  }[10m]
+                )
+              ),
+              1
+            )
+          ) > 0.01
+          and
+          sum(
+            increase(
+              api_request_count_total{
+                path="/predict"
+              }[10m]
+            )
+          ) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          service: churn-api
+          slo: availability
+        annotations:
+          summary: Prediction server-error rate exceeds 1%
+          description: >-
+            More than 1 percent of prediction requests returned
+            HTTP 5xx responses during a window with sufficient traffic.
+
+      - alert: ChurnPredictionLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(
+                api_request_latency_seconds_bucket{
+                  path="/predict"
+                }[10m]
+              )
+            )
+          ) > 1
+          and
+          sum(
+            increase(
+              api_request_count_total{
+                path="/predict"
+              }[10m]
+            )
+          ) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          service: churn-api
+          slo: latency
+        annotations:
+          summary: Prediction p95 latency exceeds one second
+          description: >-
+            The 95th percentile prediction latency has exceeded
+            one second with sufficient request volume.
