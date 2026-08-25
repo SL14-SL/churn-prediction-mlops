@@ -246,7 +246,9 @@ jobs:
 # 6️⃣ DEPLOY API (CLI)
 # -------------------------------------------------
   deploy-api:
-    needs: build-api
+    needs: 
+      - build-api
+      - deploy-mlflow
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
@@ -296,6 +298,54 @@ jobs:
             --env-from GCP_PROJECT_ID \
             --env-from GCS_BUCKET_NAME \
             --env-from GIT_COMMIT_SHA
+
+      - name: Resolve deployed API URL
+        id: deployed-api
+        shell: bash
+        run: |
+          api_url="$(
+            gcloud run services describe \
+              churn-prediction-api \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --platform managed \
+              --format='value(status.url)'
+          )"
+
+          if [ -z "$api_url" ]; then
+            echo "Cloud Run API URL could not be resolved."
+            exit 1
+          fi
+
+          echo "url=$api_url" >> "$GITHUB_OUTPUT"
+
+      - name: Verify production API liveness
+        shell: bash
+        run: |
+          api_url="${{ steps.deployed-api.outputs.url }}"
+
+          for attempt in $(seq 1 30); do
+            status="$(
+              curl \
+                --silent \
+                --output /tmp/livez.json \
+                --write-out '%{http_code}' \
+                "$api_url/livez" \
+                || true
+            )"
+
+            if [ "$status" = "200" ]; then
+              jq . /tmp/livez.json
+              exit 0
+            fi
+
+            echo "API not alive yet: attempt=$attempt status=$status"
+            sleep 2
+          done
+
+          echo "Production API did not become live."
+          cat /tmp/livez.json 2>/dev/null || true
+          exit 1
 
 # -------------------------------------------------
 # 7️⃣ BUILD MLFLOW (Build → Scan → Push)
