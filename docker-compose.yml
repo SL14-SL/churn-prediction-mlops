@@ -37,7 +37,7 @@ services:
         condition: service_healthy
 
   prefect:
-    image: prefecthq/prefect:3.6.17-python3.12
+    image: prefecthq/prefect:3.7.2-python3.12
     ports:
       - "4200:4200"
     environment:
