@@ -57,6 +57,13 @@ metrics:
     - accuracy
   evaluate_on_original_scale: true
 
+promotion:
+  minimum_f1_improvement: 0.005
+
+  maximum_recall_degradation: 0.02
+  maximum_roc_auc_degradation: 0.01
+  maximum_brier_score_increase: 0.01
+
 features:
   features:
   # Define which steps from src/data/features/core.py should run
