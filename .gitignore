@@ -86,6 +86,8 @@ results/
 # Secrets / Credentials
 # =========================
 *.json
+# Keep versioned Grafana dashboards
+!monitoring/grafana/dashboards/*.json
 
 # =========================
 # Misc project files (optional)
