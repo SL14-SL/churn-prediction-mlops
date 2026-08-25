@@ -377,21 +377,6 @@ def test_training_pipeline_drift_with_new_champion_refreshes_api(
         dataset_manifest=dataset_manifest,
     )
 
-    mock_resolve_previous = MagicMock(
-        return_value="release-previous"
-    )
-
-    mock_deploy_release = MagicMock(
-        return_value={
-            "deployment_status": "verified",
-            "release_id": "release-8",
-            "verification": {
-                "release_id": "release-8",
-            },
-            "rolled_back": False,
-        }
-    )
-
     assert result == {
         "run_id": "run_456",
         "candidate_run_id": "run_456",
@@ -712,3 +697,302 @@ def test_publish_serving_release_rejects_non_promoted_model():
                 },
             )
         )
+
+def test_training_pipeline_bootstrap_publishes_and_deploys_initial_release(
+    monkeypatch,
+):
+    dataset_manifest = {
+        "dataset_version": (
+            "ds-bootstrap-001"
+        ),
+    }
+
+    registration_result = {
+        "promoted": True,
+        "alias": "champion",
+        "model_version": "1",
+        "model_run_id": (
+            "run-bootstrap"
+        ),
+        "model_type": (
+            "gradient_boosting"
+        ),
+        "decision_threshold": 0.38,
+        "metrics": {},
+    }
+
+    published_manifest = {
+        "release_id": (
+            "release-bootstrap-v1"
+        ),
+    }
+
+    deployment_result = {
+        "deployment_status": "verified",
+        "release_id": (
+            "release-bootstrap-v1"
+        ),
+        "verification": {
+            "release_id": (
+                "release-bootstrap-v1"
+            ),
+        },
+        "rolled_back": False,
+    }
+
+    mock_champion_exists = MagicMock(
+        return_value=False
+    )
+    mock_check_drift = MagicMock(
+        return_value=False
+    )
+    mock_evaluate_champion = MagicMock()
+    mock_prepare_data = MagicMock()
+    mock_snapshot_dataset = MagicMock(
+        return_value=dataset_manifest
+    )
+    mock_train = MagicMock(
+        return_value="run-bootstrap"
+    )
+    mock_log_dataset_metadata = MagicMock()
+    mock_bootstrap_champion = MagicMock(
+        return_value=registration_result
+    )
+    mock_eval_and_reg = MagicMock()
+    mock_resolve_previous = MagicMock(
+        return_value=None
+    )
+    mock_publish_release = MagicMock(
+        return_value=published_manifest
+    )
+    mock_deploy_release = MagicMock(
+        return_value=deployment_result
+    )
+
+    monkeypatch.setattr(
+        "flows.training_flow.champion_exists",
+        mock_champion_exists,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.task_check_drift",
+        mock_check_drift,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_evaluate_champion",
+        mock_evaluate_champion,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.task_prepare_data",
+        mock_prepare_data,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_snapshot_dataset",
+        mock_snapshot_dataset,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.task_train",
+        mock_train,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_log_dataset_metadata",
+        mock_log_dataset_metadata,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_bootstrap_champion",
+        mock_bootstrap_champion,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_eval_and_reg",
+        mock_eval_and_reg,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_resolve_previous_release",
+        mock_resolve_previous,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "task_publish_serving_release",
+        mock_publish_release,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow."
+        "deploy_and_verify_release",
+        mock_deploy_release,
+    )
+
+    result = (
+        training_flow.training_pipeline.fn(
+            force_run=True,
+            bootstrap=True,
+        )
+    )
+
+    mock_champion_exists.assert_called_once()
+    mock_check_drift.assert_called_once()
+    mock_evaluate_champion.assert_not_called()
+
+    mock_prepare_data.assert_called_once_with(
+        is_drift_run=False
+    )
+    mock_snapshot_dataset.assert_called_once()
+    mock_train.assert_called_once()
+    mock_log_dataset_metadata.assert_called_once_with(
+        "run-bootstrap",
+        dataset_manifest,
+    )
+
+    mock_bootstrap_champion.assert_called_once_with(
+        candidate_run_id="run-bootstrap",
+    )
+    mock_eval_and_reg.assert_not_called()
+
+    mock_resolve_previous.assert_called_once()
+    mock_publish_release.assert_called_once_with(
+        registration_result=(
+            registration_result
+        ),
+        dataset_manifest=dataset_manifest,
+    )
+    mock_deploy_release.assert_called_once_with(
+        release_id=(
+            "release-bootstrap-v1"
+        ),
+        previous_release_id=None,
+    )
+
+    assert result == {
+        "run_id": "run-bootstrap",
+        "candidate_run_id": (
+            "run-bootstrap"
+        ),
+        "champion_promoted": True,
+        "model_version": "1",
+        "serving_release_id": (
+            "release-bootstrap-v1"
+        ),
+        "previous_release_id": None,
+        "deployment_status": "verified",
+    }
+
+
+def test_training_pipeline_rejects_bootstrap_when_champion_exists(
+    monkeypatch,
+):
+    mock_champion_exists = MagicMock(
+        return_value=True
+    )
+    mock_check_drift = MagicMock()
+
+    monkeypatch.setattr(
+        "flows.training_flow.champion_exists",
+        mock_champion_exists,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.task_check_drift",
+        mock_check_drift,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Bootstrap rejected: "
+            "a Champion already exists"
+        ),
+    ):
+        training_flow.training_pipeline.fn(
+            force_run=True,
+            bootstrap=True,
+        )
+
+    mock_champion_exists.assert_called_once()
+    mock_check_drift.assert_not_called()
+
+
+def test_bootstrap_champion_registers_initial_model(
+    monkeypatch,
+):
+    mock_champion_exists = MagicMock(
+        side_effect=[False, False]
+    )
+
+    mock_run = MagicMock()
+    mock_run.data.params = {
+        "model_type": (
+            "gradient_boosting"
+        ),
+        "decision_threshold": "0.38",
+    }
+
+    mock_client = MagicMock()
+    mock_client.get_run.return_value = (
+        mock_run
+    )
+
+    mock_client_factory = MagicMock(
+        return_value=mock_client
+    )
+
+    mock_registered_version = MagicMock()
+    mock_registered_version.version = "1"
+
+    mock_register_model = MagicMock(
+        return_value=(
+            mock_registered_version
+        )
+    )
+
+    monkeypatch.setattr(
+        "flows.training_flow.champion_exists",
+        mock_champion_exists,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.MlflowClient",
+        mock_client_factory,
+    )
+    monkeypatch.setattr(
+        "flows.training_flow.register_model",
+        mock_register_model,
+    )
+
+    result = (
+        training_flow
+        .task_bootstrap_champion
+        .fn(
+            candidate_run_id=(
+                "run-bootstrap"
+            ),
+        )
+    )
+
+    assert (
+        mock_champion_exists.call_count
+        == 2
+    )
+
+    mock_client.get_run.assert_called_once_with(
+        "run-bootstrap"
+    )
+    mock_register_model.assert_called_once_with(
+        "run-bootstrap",
+        alias="champion",
+    )
+
+    assert result == {
+        "promoted": True,
+        "alias": "champion",
+        "model_version": "1",
+        "model_run_id": (
+            "run-bootstrap"
+        ),
+        "model_type": (
+            "gradient_boosting"
+        ),
+        "decision_threshold": 0.38,
+        "metrics": {},
+    }
