@@ -167,10 +167,15 @@ services:
       - prometheus
     networks:
       - mlops-net
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/provisioned-dashboards:ro
 
 networks:
   mlops-net:
     driver: bridge
-    
+
 volumes:
   alertmanager-data:
+  grafana-data:
