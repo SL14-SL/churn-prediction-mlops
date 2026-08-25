@@ -1,10 +1,13 @@
 from __future__ import annotations
+from datetime import datetime
 
 import pandas as pd
 
 from src.configs.loader import file_exists, get_path, load_config
 from src.utils.logger import get_logger
 
+from src.monitoring.retraining_policy import RetrainingDecision, decide_retraining
+from src.monitoring.signal_collector import collect_retraining_signals
 logger = get_logger(__name__)
 
 MONITORING_PATH = get_path("monitoring")
@@ -92,3 +95,34 @@ def should_retrain() -> bool:
 
     logger.info("No retraining needed. Latest churn metrics are within thresholds.")
     return False
+
+def evaluate_retraining(
+    *,
+    evaluated_at: datetime
+    | pd.Timestamp
+    | None = None,
+) -> RetrainingDecision:
+    """
+    Collect current signals and evaluate the guarded retraining policy.
+    """
+    signals = (
+        collect_retraining_signals(
+            evaluated_at=evaluated_at
+        )
+    )
+
+    decision = decide_retraining(
+        signals
+    )
+
+    logger.info(
+        "Retraining decision evaluated | "
+        "action=%s decision_id=%s "
+        "triggers=%s reasons=%s",
+        decision.action.value,
+        decision.decision_id,
+        list(decision.trigger_types),
+        list(decision.reasons),
+    )
+
+    return decision 
