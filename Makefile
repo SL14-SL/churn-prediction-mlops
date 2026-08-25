@@ -9,7 +9,9 @@ PREFECT_POOL ?= local-pool
 
 .PHONY: help setup dev-up dev-down dev train train-force test lint clean \
         ui-prefect ui-mlflow prefect-status wait-prefect logs refresh-api \
-        prefect-pool prefect-setup prefect-worker auto-retrain
+        prefect-pool prefect-setup prefect-worker auto-retrain \
+		predict-test demo-churn-lifecycle \
+		train-bootstrap
 
 # --- Main Entry Point ---
 
@@ -117,6 +119,10 @@ train-force: wait-prefect ## Execute forced training flow inside the API contain
 	@echo "🧠 Starting forced training flow inside API container..."
 	$(COMPOSE_RUN_API) uv run python flows/training_flow.py --force
 
+train-bootstrap: wait-prefect ## Create the initial Champion in an empty registry
+	@echo "🌱 Bootstrapping initial Champion..."
+	$(COMPOSE_RUN_API) uv run python flows/training_flow.py --force --bootstrap
+
 auto-retrain: wait-prefect ## Run auto retrain flow once manually inside the API container
 	@echo "🤖 Running auto retrain flow once inside API container..."
 	$(COMPOSE_RUN_API) uv run python flows/auto_retrain_flow.py
@@ -126,12 +132,12 @@ predict-test:
 	@curl -s -X POST http://localhost:8000/predict \
 		-H "Content-Type: application/json" \
 		-H "X-API-KEY: $(API_KEY)" \
-		-d '{"inputs":[{"customerID":"7590-VHVEG","gender":"Female","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":1,"PhoneService":"No","MultipleLines":"No phone service","InternetService":"DSL","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"No","StreamingMovies":"No","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":29.85,"TotalCharges":"29.85"}]}' \
+		-d '{"context":{"request_id":"make-predict-test"},"inputs":[{"customerID":"7590-VHVEG","gender":"Female","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":1,"PhoneService":"No","MultipleLines":"No phone service","InternetService":"DSL","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"No","StreamingMovies":"No","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":29.85,"TotalCharges":"29.85"}]}' \
 		| jq .
 
 demo-churn-lifecycle:
 	docker compose exec api uv run --no-sync python scripts/run_churn_demo.py --batch-size 50 --max-days 5 --label-delay-days 1
-	
+
 # --- Quality Assurance ---
 
 test: ## Run unit and integration tests

@@ -10,6 +10,7 @@ from datetime import datetime
 
 # --- THIRD PARTY IMPORTS ---
 import mlflow
+from mlflow.tracking import MlflowClient
 
 from google.cloud import storage
 
@@ -31,7 +32,7 @@ from src.data.splits.split import split as split_logic
 from src.data.versioning import make_dataset_version, snapshot_current_datasets, log_dataset_manifest_to_mlflow
 
 from src.training.train import train
-from src.training.register import register_model
+from src.training.register import register_model, champion_exists
 from src.training.evaluate import compare_models, evaluate_model
 from src.training.policy import should_refresh_api, should_skip_training, get_run_strategy
 
@@ -240,6 +241,82 @@ def task_eval_and_reg(
         "metrics": metrics,
     }
 
+@task(name="Bootstrap Initial Champion")
+def task_bootstrap_champion(
+    candidate_run_id: str,
+) -> dict:
+    """
+    Create the first Champion in an empty model registry.
+
+    Bootstrap is rejected when a Champion already exists.
+    """
+    p_logger = get_run_logger()
+
+    if champion_exists():
+        raise RuntimeError(
+            "Bootstrap rejected: a Champion "
+            "already exists."
+        )
+
+    p_logger.info(
+        "No Champion exists. Starting explicit "
+        "initial bootstrap | "
+        f"candidate_run_id={candidate_run_id}"
+    )
+
+    run_data = (
+        MlflowClient()
+        .get_run(candidate_run_id)
+        .data
+    )
+
+    decision_threshold = float(
+        run_data.params.get(
+            "decision_threshold",
+            0.5,
+        )
+    )
+
+    model_type = run_data.params.get(
+        "model_type",
+        TRAIN_CFG["model"]["type"],
+    )
+
+    # Check again immediately before changing
+    # the registry state.
+    if champion_exists():
+        raise RuntimeError(
+            "Bootstrap aborted: a Champion "
+            "was created concurrently."
+        )
+
+    registered_version = register_model(
+        candidate_run_id,
+        alias="champion",
+    )
+
+    p_logger.info(
+        "Initial Champion created | "
+        f"run_id={candidate_run_id} | "
+        "model_version="
+        f"{registered_version.version}"
+    )
+
+    return {
+        "promoted": True,
+        "alias": "champion",
+        "model_version": str(
+            registered_version.version
+        ),
+        "model_run_id": candidate_run_id,
+        "model_type": model_type,
+        "decision_threshold": (
+            decision_threshold
+        ),
+        "metrics": {},
+    }
+
+
 @task(name="Publish Serving Release")
 def task_publish_serving_release(
     *,
@@ -399,7 +476,15 @@ def task_archive_logs():
 
 
 @flow(name="End-to-End Churn Pipeline")
-def training_pipeline(force_run: bool = False):
+def training_pipeline(force_run: bool = False, bootstrap: bool = False):
+        
+    if bootstrap and champion_exists():
+        raise RuntimeError(
+            "Bootstrap rejected: a Champion "
+            "already exists. Use the regular "
+            "forced training flow instead."
+        )
+
     p_logger = get_run_logger()
     p_logger.info(f"Starting Pipeline (Env: {ENV_CFG['environment']})")
     
@@ -420,11 +505,18 @@ def training_pipeline(force_run: bool = False):
 
     #task_archive_logs() 
 
-    registration_result = (
-        task_eval_and_reg(
-            run_id
+    if bootstrap:
+        registration_result = (
+            task_bootstrap_champion(
+                candidate_run_id=run_id,
+            )
         )
-    )
+    else:
+        registration_result = (
+            task_eval_and_reg(
+                run_id
+            )
+        )
 
     release_manifest = None
     deployment_result = None
@@ -515,8 +607,15 @@ def training_pipeline(force_run: bool = False):
 
 if __name__ == "__main__":
     force = "--force" in sys.argv
-    import json
+    bootstrap = "--bootstrap" in sys.argv
 
-    result = training_pipeline(force_run=force)
-    print("TRAINING_RESULT_JSON=" + json.dumps(result))
+    result = training_pipeline(
+        force_run=force,
+        bootstrap=bootstrap,
+    )
+
+    print(
+        "TRAINING_RESULT_JSON="
+        + json.dumps(result)
+    )
     

@@ -28,7 +28,13 @@ def run_prediction_pipeline(
 ):
     request_started = time.perf_counter()
     timings: dict[str, float] = {}
-    request_id = payload.context.get("request_id", str(uuid4()))
+    request_id = (
+        payload.context
+        or {}
+    ).get(
+        "request_id",
+        str(uuid4()),
+    )
     environment = os.getenv("APP_ENV", "dev")
 
     t = time.perf_counter()

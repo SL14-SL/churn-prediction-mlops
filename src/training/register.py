@@ -1,8 +1,12 @@
 import pandas as pd
 import mlflow
 from mlflow.tracking import MlflowClient
+from mlflow.exceptions import MlflowException
+from mlflow.protos.databricks_pb2 import ErrorCode, RESOURCE_DOES_NOT_EXIST
 from src.configs.loader import load_config
 from src.utils.logger import get_logger
+
+
 
 logger = get_logger(__name__)
 
@@ -55,9 +59,47 @@ def register_model(run_id: str, alias: str = "champion"):
         logger.error(f"Failed to register model or assign alias '{alias}': {str(e)}")
         raise
 
+def champion_exists() -> bool:
+    """
+    Return whether the configured registered model has a Champion alias.
+
+    A missing registered model is an expected bootstrap condition.
+    Unexpected registry errors are propagated.
+    """
+    client = MlflowClient()
+
+    try:
+        registered_model = (
+            client.get_registered_model(
+                MODEL_NAME
+            )
+        )
+
+    except MlflowException as error:
+        missing_model_codes = {
+            RESOURCE_DOES_NOT_EXIST,
+            ErrorCode.Name(
+                RESOURCE_DOES_NOT_EXIST
+            ),
+        }
+
+        if (
+            error.error_code
+            in missing_model_codes
+        ):
+            return False
+
+        raise
+
+    aliases = (
+        registered_model.aliases
+        or {}
+    )
+
+    return "champion" in aliases
+
 if __name__ == "__main__":
     import sys
-    import pandas as pd # Needed for the timestamp tag
     if len(sys.argv) > 1:
         register_model(sys.argv[1])
     else:
