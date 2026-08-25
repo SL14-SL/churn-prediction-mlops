@@ -8,7 +8,7 @@ variable "project_id" {
 variable "region" {
   description = "The GCP region for all resources"
   type        = string
-  default     = "europe-west1" 
+  default     = "europe-west1"
 }
 
 # environment variable to distinguish between dev, staging, and prod later

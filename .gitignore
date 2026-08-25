@@ -78,6 +78,9 @@ results/
 *.tfstate.backup
 *.tfvars
 *.backup
+tfplan
+tfplan-*
+*.tfplan
 
 # Keep example variable files
 !example.tfvars

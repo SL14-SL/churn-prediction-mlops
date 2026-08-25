@@ -68,6 +68,12 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
 
   depends_on = [null_resource.wait_for_apis]
 
+  lifecycle {
+    ignore_changes = [
+      template,
+    ]
+  }
+
   template {
     service_account = google_service_account.mlops_sa.email
 
@@ -86,7 +92,17 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
 
       env {
         name  = "MLFLOW_BACKEND_STORE_URI"
-        value = "sqlite:///tmp/mlflow.db"
+        value = "sqlite:////tmp/mlflow.db"
+      }
+
+      env {
+        name  = "MLFLOW_SERVER_ALLOWED_HOSTS"
+        value = "*"
+      }
+
+      env {
+        name  = "MLFLOW_SERVER_CORS_ALLOWED_ORIGINS"
+        value = "*"
       }
 
       env {
@@ -96,9 +112,6 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
     }
   }
 
-  lifecycle {
-    ignore_changes = [template[0].containers[0].image]
-  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public_mlflow" {
@@ -110,10 +123,16 @@ resource "google_cloud_run_v2_service_iam_member" "public_mlflow" {
 
 # --- SERVICE 2: Prediction API ---
 resource "google_cloud_run_v2_service" "prediction_api" {
-  name                = "prediction-api"
+  name                = "churn-prediction-api"
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
+
+  lifecycle {
+    ignore_changes = [
+      template,
+    ]
+  }
 
   depends_on = [null_resource.wait_for_apis]
 
@@ -139,9 +158,6 @@ resource "google_cloud_run_v2_service" "prediction_api" {
     }
   }
 
-  lifecycle {
-    ignore_changes = [template[0].containers[0].image]
-  }
 }
 
 # --- Workload Identity Federation ---
@@ -164,7 +180,7 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
     "attribute.repository" = "assertion.repository"
   }
 
-attribute_condition = "attribute.repository == '${var.github_repo}' && assertion.ref == 'refs/heads/main'"
+  attribute_condition = "attribute.repository == '${var.github_repo}' && assertion.ref == 'refs/heads/main'"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
