@@ -3,11 +3,18 @@ import mlflow
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import (
+    confusion_matrix, 
+    f1_score,
+    brier_score_loss,
+    recall_score,
+    roc_auc_score,
+)
 from mlflow.tracking import MlflowClient
 from src.configs.loader import load_config, get_path
 from src.utils.logger import get_logger
 from src.training.utils import build_drop_columns
+from src.training.promotion_policy import PromotionThresholds, evaluate_promotion_policy
 
 logger = get_logger(__name__)
 
@@ -55,6 +62,94 @@ def predict_with_threshold(model, X_val, threshold: float):
         return (preds >= threshold).astype(int)
 
     return preds
+
+def calculate_model_metrics(
+    model,
+    X_val,
+    y_val,
+    *,
+    threshold: float,
+) -> dict[str, float]:
+    """
+    Calculate classification and calibration metrics from probabilities.
+    """
+    probabilities = model.predict(
+        X_val
+    )
+
+    probabilities = (
+        pd.Series(probabilities)
+        .astype(float)
+        .to_numpy()
+    )
+
+    predictions = (
+        probabilities >= threshold
+    ).astype(int)
+
+    return {
+        "f1": float(
+            f1_score(
+                y_val,
+                predictions,
+                zero_division=0,
+            )
+        ),
+        "recall": float(
+            recall_score(
+                y_val,
+                predictions,
+                zero_division=0,
+            )
+        ),
+        "roc_auc": float(
+            roc_auc_score(
+                y_val,
+                probabilities,
+            )
+        ),
+        "brier_score": float(
+            brier_score_loss(
+                y_val,
+                probabilities,
+            )
+        ),
+    }
+
+def get_promotion_thresholds() -> (
+    PromotionThresholds
+):
+    cfg = TRAIN_CFG.get(
+        "promotion",
+        {},
+    )
+
+    return PromotionThresholds(
+        minimum_f1_improvement=float(
+            cfg.get(
+                "minimum_f1_improvement",
+                0.005,
+            )
+        ),
+        maximum_recall_degradation=float(
+            cfg.get(
+                "maximum_recall_degradation",
+                0.02,
+            )
+        ),
+        maximum_roc_auc_degradation=float(
+            cfg.get(
+                "maximum_roc_auc_degradation",
+                0.01,
+            )
+        ),
+        maximum_brier_score_increase=float(
+            cfg.get(
+                "maximum_brier_score_increase",
+                0.01,
+            )
+        ),
+    )
 
 def _generate_and_log_plots(model, X_val, y_val, run_id, threshold: float = 0.5):
     """Generates evaluation plots and logs them to the specific MLflow run."""
@@ -118,54 +213,191 @@ def evaluate_model(model_alias: str = "champion") -> float:
         logger.warning(f"Could not evaluate {model_alias}: {e}")
         return None
 
-def compare_models(new_run_id: str, val_path: str | None = None):
+    
+def compare_models(
+    new_run_id: str,
+    val_path: str | None = None,
+):
     """
-    Compares the new model (Challenger) with the current Champion.
-    Also generates detailed plots for the Challenger.
-    Returns (is_better: bool, metrics: dict).
+    Compare Challenger and Champion using explicit promotion gates.
+
+    Returns:
+        (promote: bool, metrics: dict)
     """
+    del val_path
+
     client = MlflowClient()
-    X_val, y_val = _load_and_prep_val_data()
-    
-    # 1. Evaluate and Plot the Challenger
-    logger.info(f"Evaluating Challenger (Run ID: {new_run_id})...")
-    challenger_uri = f"runs:/{new_run_id}/model"
-    challenger = mlflow.pyfunc.load_model(challenger_uri)
-    
-    # Predict for metric calculation
-    challenger_threshold = get_decision_threshold_from_run(new_run_id)
-    chall_preds = predict_with_threshold(challenger, X_val, challenger_threshold)
-    chall_f1 = f1_score(y_val, chall_preds)
-    metrics = {"challenger_f1": float(chall_f1)}
-    metrics["challenger_decision_threshold"] = challenger_threshold
-    
-    # --- ADDED: Generate and log plots ---
-    _generate_and_log_plots(challenger, X_val, y_val, new_run_id)
+    X_val, y_val = (
+        _load_and_prep_val_data()
+    )
 
-    # 2. Evaluate the current Champion
+    challenger_uri = (
+        f"runs:/{new_run_id}/model"
+    )
+
+    logger.info(
+        "Evaluating Challenger | "
+        "run_id=%s",
+        new_run_id,
+    )
+
+    challenger = (
+        mlflow.pyfunc.load_model(
+            challenger_uri
+        )
+    )
+
+    challenger_threshold = (
+        get_decision_threshold_from_run(
+            new_run_id
+        )
+    )
+
+    challenger_metrics = (
+        calculate_model_metrics(
+            challenger,
+            X_val,
+            y_val,
+            threshold=(
+                challenger_threshold
+            ),
+        )
+    )
+
+    _generate_and_log_plots(
+        challenger,
+        X_val,
+        y_val,
+        new_run_id,
+        threshold=(
+            challenger_threshold
+        ),
+    )
+
+    champion_metrics = None
+    champion_threshold = None
+
     try:
-        champion_uri = f"models:/{MODEL_NAME}@champion"
-        logger.info(f"Evaluating current Champion from Registry: {champion_uri}")
-        
-        mv = client.get_model_version_by_alias(MODEL_NAME, "champion")
-        champion_threshold = get_decision_threshold_from_run(mv.run_id)
+        champion_version = (
+            client.get_model_version_by_alias(
+                MODEL_NAME,
+                "champion",
+            )
+        )
 
-        champion = mlflow.pyfunc.load_model(champion_uri)
-        champ_preds = predict_with_threshold(champion, X_val, champion_threshold)
+        champion_threshold = (
+            get_decision_threshold_from_run(
+                champion_version.run_id
+            )
+        )
 
-        champ_f1 = f1_score(y_val, champ_preds)
-        metrics["champion_f1"] = float(champ_f1)
-        metrics["champion_decision_threshold"] = champion_threshold
-        
-        logger.info(f"Comparison: Challenger F1 ({chall_f1:.4f}) vs Champion F1 ({champ_f1:.4f})")
+        champion = (
+            mlflow.pyfunc.load_model(
+                (
+                    f"models:/{MODEL_NAME}"
+                    "@champion"
+                )
+            )
+        )
 
-        # For Churn/F1: Higher is better!
-        is_better = chall_f1 > champ_f1
-        return is_better, metrics
+        champion_metrics = (
+            calculate_model_metrics(
+                champion,
+                X_val,
+                y_val,
+                threshold=(
+                    champion_threshold
+                ),
+            )
+        )
 
-    except Exception as e:
-        logger.warning(f"Comparison skipped (Reason: {e}). Challenger wins by default.")
-        return True, metrics
+    except Exception as error:
+        logger.warning(
+            "Champion evaluation unavailable. "
+            "Bootstrap promotion policy will "
+            "be used | reason=%s",
+            error,
+        )
+
+    decision = (
+        evaluate_promotion_policy(
+            challenger_metrics=(
+                challenger_metrics
+            ),
+            champion_metrics=(
+                champion_metrics
+            ),
+            thresholds=(
+                get_promotion_thresholds()
+            ),
+        )
+    )
+
+    metrics = {
+        "challenger_f1": (
+            challenger_metrics["f1"]
+        ),
+        "challenger_recall": (
+            challenger_metrics["recall"]
+        ),
+        "challenger_roc_auc": (
+            challenger_metrics["roc_auc"]
+        ),
+        "challenger_brier_score": (
+            challenger_metrics[
+                "brier_score"
+            ]
+        ),
+        "challenger_decision_threshold": (
+            challenger_threshold
+        ),
+        "promotion_gates": (
+            decision.gates
+        ),
+        "promotion_reasons": list(
+            decision.reasons
+        ),
+    }
+
+    if champion_metrics is not None:
+        metrics.update(
+            {
+                "champion_f1": (
+                    champion_metrics["f1"]
+                ),
+                "champion_recall": (
+                    champion_metrics[
+                        "recall"
+                    ]
+                ),
+                "champion_roc_auc": (
+                    champion_metrics[
+                        "roc_auc"
+                    ]
+                ),
+                "champion_brier_score": (
+                    champion_metrics[
+                        "brier_score"
+                    ]
+                ),
+                "champion_decision_threshold": (
+                    champion_threshold
+                ),
+            }
+        )
+
+    logger.info(
+        "Promotion decision | "
+        "promote=%s gates=%s reasons=%s",
+        decision.promote,
+        decision.gates,
+        list(decision.reasons),
+    )
+
+    return (
+        decision.promote,
+        metrics,
+    )
 
 if __name__ == "__main__":
     import sys
