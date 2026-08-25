@@ -5,22 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "churn_prediction_mlops"
 version = "0.1.0"
-description = "Reusable MLOps template for forecasting projects"
+description = "Reusable MLOps template for classification projects"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "fastapi==0.128.6",
+    "fastapi==0.141.1",
     "uvicorn==0.40.0",
     "pandas==2.3.3",
-    "pyarrow==22.0.0",
+    "pyarrow==25.0.1",
     "python-dotenv>=1.2.1",
     "pandera==0.29.0",
     "scikit-learn==1.8.0",
     "scipy==1.17.0",
     "xgboost==3.1.3",
-    "mlflow==3.9.0",
-    "mlflow-skinny==3.9.0",
-    "mlflow-tracing==3.9.0",
-    "prefect==3.6.17",
+    "mlflow==3.15.1",
+    "mlflow-skinny==3.15.1",
+    "mlflow-tracing==3.15.1",
+    "prefect==3.7.2",
     "prometheus-fastapi-instrumentator>=7.1.0",
     # GCP-first blueprint dependencies
     "gcsfs==2026.2.0",
@@ -30,16 +30,25 @@ dependencies = [
     "google-cloud-run>=0.15.0",
     "google-cloud-storage>=3.9.0",
     "db-dtypes>=1.5.0",
-    "pyasn1>=0.6.3",
+    "pyasn1>=0.6.4",
     "prometheus-client==0.23.1",
-    "pillow>=12.2.0",
+    "pillow>=12.3.0",
     "seaborn>=0.13.2",
     "shap>=0.51.0",
     "streamlit>=1.57.0",
     "plotly>=6.7.0",
-    "gitpython>=3.1.49",
+    "gitpython==3.1.59",
     "mako>=1.3.12",
     "fastapi-swagger-ui-theme>=0.1.0",
+    # Explicit security constraints for transitive dependencies
+    "cryptography==49.0.0",
+    "msgpack==1.2.1",
+    "setuptools>=78.1.1",
+    "aiohttp>=3.14.3",
+    "python-multipart>=0.0.30",
+    "starlette==1.3.1",
+    "sqlparse>=0.6.0",
+    "urllib3>=2.7.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -49,7 +58,7 @@ include = ["src*"]
 [dependency-groups]
 dev = [
     "pytest==9.0.2",
-    "ruff>=0.15.6",
+    "ruff==0.15.22",
 ]
 
 [tool.ruff]
