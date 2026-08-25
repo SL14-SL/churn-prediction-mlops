@@ -19,6 +19,11 @@ def mock_prefect_run_logger(
         "get_run_logger",
         MagicMock(return_value=logger),
     )
+    monkeypatch.setattr(
+        auto_retrain_flow,
+        "task_refresh_monitoring_signals",
+        MagicMock(),
+    )
 
     return logger
 

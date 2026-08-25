@@ -5,22 +5,46 @@ from typing import Any
 from prefect import (
     flow,
     get_run_logger,
+    task,
 )
 
 from flows.training_flow import (
     training_pipeline,
 )
-from src.monitoring.retraining_policy import (
-    RetrainingAction,
-)
+from src.monitoring.retraining_policy import RetrainingAction
+
 from src.monitoring.retraining_state import (
     decision_was_processed,
     record_successful_retraining,
 )
-from src.monitoring.trigger import (
-    evaluate_retraining,
-)
+from src.monitoring.trigger import evaluate_retraining
+from src.monitoring.monitoring_refresh import refresh_monitoring_signals
 
+@task(name="Refresh Monitoring Signals")
+def task_refresh_monitoring_signals():
+    logger = get_run_logger()
+
+    result = (
+        refresh_monitoring_signals()
+    )
+
+    logger.info(
+        "Monitoring signals refreshed | "
+        "ground_truth_rows=%s "
+        "performance_updated=%s "
+        "performance_rows=%s "
+        "feature_drift_updated=%s "
+        "feature_drift_rows=%s "
+        "performance_reason=%s",
+        result.ground_truth_rows,
+        result.performance_updated,
+        result.performance_rows,
+        result.feature_drift_updated,
+        result.feature_drift_rows,
+        result.performance_reason,
+    )
+
+    return result
 
 @flow(name="Auto Retrain Decision Flow")
 def auto_retrain_flow() -> dict[
@@ -28,6 +52,8 @@ def auto_retrain_flow() -> dict[
     Any,
 ]:
     logger = get_run_logger()
+
+    task_refresh_monitoring_signals()
 
     decision = evaluate_retraining()
 
