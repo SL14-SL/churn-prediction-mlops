@@ -81,6 +81,14 @@ def log_prediction(
         }
         print(json.dumps(log_entry), file=sys.stdout, flush=True)
 
+        if resolved_environment == "prod":
+            logger.info(
+                "Production prediction emitted to structured cloud logging "
+                "| prediction_id=%s",
+                prediction_id,
+            )
+            return
+
         # 2) Persistent row for parquet storage
         log_data = {
             **input_data,
