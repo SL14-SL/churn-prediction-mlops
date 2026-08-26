@@ -310,7 +310,7 @@ The pipeline includes:
 The API image is deployed with an immutable Git SHA tag. Infrastructure is managed through Terraform.
 
 <p align="center">
-  <img src="docs/images/CI-Pipeline.png" width="100%" alt="GitHub Actions pipeline">
+  <img src="docs/images/ci_pipeline.png" width="100%" alt="GitHub Actions pipeline">
 </p>
 
 ---
