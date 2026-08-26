@@ -1,399 +1,164 @@
 # 🚀 Production-Oriented MLOps Blueprint for Customer Churn Prediction
 
-End-to-end MLOps showcase for deploying, monitoring and continuously improving machine learning models in a cloud-native production-style environment.
+End-to-end MLOps showcase for deploying, monitoring and continuously improving a customer churn classification system in local and cloud environments.
 
-Customer churn prediction is used as the example use case, but the architecture is designed around reusable MLOps patterns: model serving, experiment tracking, model registry workflows, monitoring, automated retraining, CI/CD and infrastructure-as-code.
-
-The focus is not only model training, but the engineering layer required to operate ML systems reliably after the model has been trained.
+Customer churn is the example use case. The primary focus is the engineering layer required to operate machine learning reliably after training: reproducible data processing, experiment tracking, controlled model promotion, atomic serving releases, API observability, delayed-label monitoring, guarded retraining, rollback and automated cloud deployment.
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-Inference_API-green)
-![MLflow](https://img.shields.io/badge/MLflow-Model_Registry-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-Inference_API-009688)
+![MLflow](https://img.shields.io/badge/MLflow-Registry-0194E2)
+![Prefect](https://img.shields.io/badge/Prefect-Orchestration-070E10)
 ![Terraform](https://img.shields.io/badge/Terraform-IaC-623CE4)
-![CI/CD](https://img.shields.io/badge/CI/CD-GitHub_Actions-black)
+![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-181717)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-# 🎯 What This Project Demonstrates
+## 🎯 What This Project Demonstrates
 
-This project demonstrates a production-oriented ML lifecycle beyond notebook-based modeling:
+This repository demonstrates a production-oriented ML lifecycle beyond notebook-based modeling:
 
-- FastAPI model serving for single and batch prediction
-- MLflow experiment tracking and model registry workflows
-- Champion/challenger promotion and controlled model rollout
+- validated and versioned datasets
+- reproducible feature engineering
 - Prefect-based training and retraining orchestration
-- Feature drift, delayed-label and performance monitoring
-- Prometheus/Grafana metrics for API observability
-- Business-oriented decision logic based on churn probabilities
-- CI/CD with tests, Docker builds, Trivy scanning and Cloud Run deployment
-- Infrastructure as Code with Terraform on Google Cloud Platform
+- MLflow experiment tracking and model registry workflows
+- explicit bootstrap of the first production Champion
+- Champion/challenger evaluation with classification-specific promotion gates
+- immutable serving releases with checksummed manifests
+- atomic activation and rollback of complete serving bundles
+- FastAPI inference, prioritization and campaign simulation
+- prediction logging and delayed-label performance evaluation
+- technical and business-oriented monitoring
+- Prometheus metrics, Grafana SLO dashboards and Alertmanager notifications
+- CI/CD with tests, container builds and vulnerability scanning
+- Terraform-managed deployment to Google Cloud Run
 
-The goal is to demonstrate reusable MLOps patterns for operating ML systems reliably over time.
+The goal is not merely to train a classifier, but to demonstrate how an ML system can be operated, observed and changed safely over time.
 
 ---
 
-# 🧩 Blueprint Positioning
+## 🧩 Blueprint Positioning
 
 This repository is the classification and decisioning variant of a reusable MLOps blueprint.
 
-The goal is not to optimize one specific dataset, but to show how the same production-oriented ML architecture can be adapted to different machine learning problem types.
-
-| Project | Problem Type | Use Case | Main Adapted Components |
+| Project | Problem Type | Example Use Case | Domain-Specific Components |
 |---|---|---|---|
-| Customer Churn MLOps | Binary Classification | Retention risk prediction | Classification metrics, churn decision logic, delayed labels |
-| Sales Forecasting MLOps | Time Series / Regression | Demand prediction | Temporal features, forecasting state, regression monitoring |
+| Customer Churn MLOps | Binary classification | Retention risk prediction | Classification metrics, delayed labels, churn decision policy |
+| Sales Forecasting MLOps | Time-series regression | Demand forecasting | Temporal features, forecasting state, regression monitoring |
 
-The shared lifecycle is: data validation, feature engineering, training, MLflow tracking and registry, API serving, prediction logging, monitoring, retraining and CI/CD deployment.
-
-The churn use case mainly adapts the domain-specific layers: classification metrics, delayed-label evaluation, churn-risk monitoring and business-oriented retention decision logic.
+Both variants share the same operational architecture: validation, feature engineering, orchestration, experiment tracking, model registry, serving releases, API deployment, monitoring, retraining and CI/CD.
 
 ---
 
-# 🖥️ Demo Highlights
-
-The repository includes screenshots and examples for:
-
-- FastAPI Swagger UI for prediction and explainability endpoints
-- MLflow experiment tracking and model registry
-- Prefect training and retraining flows
-- Streamlit dashboard for model and business monitoring
-- Grafana dashboard for API metrics
-- GitHub Actions CI/CD pipeline
-
----
-
-# 🏗️ Architecture Overview
-
-The platform implements a complete operational ML lifecycle including:
-
-* data validation
-* feature engineering
-* experiment tracking
-* model serving
-* monitoring
-* automated retraining
-* CI/CD deployment
+## 🏗️ Architecture Overview
 
 ```mermaid
 flowchart TB
-A[Raw Customer Data] --> B[Validation]
-B --> C[Feature Engineering]
-C --> D[Training Pipeline - Prefect]
-D --> E[MLflow Registry]
-E --> F[FastAPI Prediction API]
-
-F --> G[Prediction Logs]
-G --> H[Monitoring Layer]
-
-H --> I[Data Drift Detection]
-H --> J[Performance Monitoring]
-H --> K[Alerts & Retraining Trigger]
-
-K --> L[Retraining Pipeline]
-L --> D
+    A[Raw customer data] --> B[Validation and versioning]
+    B --> C[Feature engineering]
+    C --> D[Prefect training flow]
+    D --> E[MLflow tracking and registry]
+    E --> F[Promotion policy]
+    F --> G[Immutable serving release]
+    G --> H[FastAPI prediction API]
+    H --> I[Prediction and decision logs]
+    I --> J[Monitoring and delayed labels]
+    J --> K[Retraining policy]
+    K --> D
 ```
 
----
-
-# 🔌 API & Model Serving
-
-The platform exposes a production-style FastAPI inference service with:
-
-* single and batch prediction support
-* prediction explanations via `/explain`
-* customer prioritization via `/prioritize`
-* campaign simulation support
-* health, liveness and readiness probes
-* Prometheus metrics via `/metrics`
-* authenticated inference requests
-* OpenAPI documentation via Swagger UI
-* structured prediction metadata including request IDs, timing and model information
-
-The API is containerized and deployed to Google Cloud Run.
-
-<p align="center">
-  <img src="docs/images/swagger_ui.png" width="100%">
-</p>
+The serving API does not independently assemble model artifacts at request time. It loads a validated release that binds the model version, feature schema, decision threshold and lineage metadata into one deployable unit.
 
 ---
 
-# 🔁 Automated Training & Retraining
+## 📦 Atomic Serving Releases
 
-Training and retraining workflows are orchestrated with Prefect.
+Every deployable model is represented by an immutable release manifest. A release includes references and checksums for the artifacts required during inference, including:
 
-The pipeline automates:
+- registered model name and version
+- MLflow run ID and immutable model URI
+- model type
+- decision threshold
+- feature schema
+- prediction probe
+- dataset version
+- configuration hash
+- Git commit
 
-* feature drift checks
-* dataset snapshotting
-* feature processing
-* model training
-* evaluation & registration
-* API refresh & health verification
+The API validates the complete bundle before replacing the active serving state. A failed reload therefore keeps the previous working bundle active.
 
-Retraining workflows can be triggered by monitoring signals or scheduled execution.
+This prevents partial deployments such as:
 
-<p align="center">
-  <img src="docs/images/prefect_flow.png" width="100%">
-</p>
+- new model with old feature schema
+- updated threshold with old model
+- missing or corrupted serving artifact
+- alias changes during model loading
 
----
-
-# 📊 Experiment Tracking & Model Evaluation
-
-MLflow is used for experiment tracking, metric logging and model lineage management.
-
-Tracked metrics include:
-
-* accuracy
-* precision / recall
-* ROC AUC
-* calibration metrics
-* decision thresholds
-* business impact metrics
-* estimated training costs
-
-<p align="center">
-  <img src="docs/images/mlflow_run_overview.png" width="100%">
-</p>
+Serving releases can be inspected and rolled back without rebuilding the API image.
 
 ---
 
-# 📈 Operational Monitoring Dashboard
+## 🔌 API and Decision Service
 
-The platform includes a custom Streamlit monitoring dashboard for operational ML observability and business decision analytics.
+The FastAPI service supports:
 
-The dashboard combines:
-
-* model performance monitoring
-* retraining trigger visualization
-* retention action analytics
-* expected-value evaluation
-* business policy simulation
-* churn risk distribution analysis
-
-This layer demonstrates how ML systems can be monitored not only technically, but also from a business-impact perspective.
-
-<p align="center">
-  <img src="docs/images/streamlit_dashboard_overview.png" width="100%">
-</p>
-
-<p align="center">
-  <img src="docs/images/streamlit_dashboard_business.png" width="100%">
-</p>
-
----
-
-# 🏆 Model Registry & Promotion Workflow
-
-Models are versioned and promoted through the MLflow Model Registry.
-
-The platform supports:
-
-* champion model aliases
-* model versioning
-* reproducible artifacts
-* deployment metadata
-* automated model promotion
-
-The serving API loads the active champion model from the registry and exposes an administrative reload endpoint so newly promoted models can be picked up without rebuilding the API image.
-
-The registry workflow is designed to support controlled model promotion and rollback patterns using MLflow aliases.
-
-This enables reproducible and traceable production deployments.
-
-<p align="center">
-  <img src="docs/images/mlflow_model_details.png" width="90%">
-</p>
-
----
-
-# 🚀 CI/CD & Cloud Deployment
-
-The project includes a fully automated CI/CD pipeline using GitHub Actions.
-
-Pipeline stages include:
-
-- linting
-- unit & integration tests
-- API smoke tests
-- Docker image builds
-- vulnerability scanning with Trivy
-- container registry publishing
-- Cloud Run deployment
-
-The deployment workflow validates, builds, scans and deploys the services automatically on every push to `main`.
-
-<p align="center">
-  <img src="docs/images/CI-Pipeline.png" width="100%">
-</p>
-
----
-
-# ⚙️ Key Capabilities
-
-## 📊 Monitoring & Observability
-
-The platform includes operational ML monitoring capabilities for both technical and business-level evaluation.
-
-Monitoring features include:
-
-- feature drift detection
-- production inference logging
-- delayed ground-truth evaluation
-- classification performance monitoring
-- business impact metrics
-- retraining trigger evaluation
-- retention action distribution
-- expected-value based decision monitoring
-- prediction and request metadata logging
+- single and batch churn prediction
+- authenticated requests via `X-API-KEY`
+- customer IDs in decision responses
+- configurable decision thresholds
+- customer-value estimation
+- expected-value-based retention actions
+- customer prioritization
+- campaign simulation
+- prediction explanations
+- structured lineage and timing metadata
+- liveness and readiness probes
 - Prometheus metrics
-- Grafana dashboards
+- administrative model reload and serving rollback
 
-The monitoring layer continuously evaluates whether the currently deployed champion model still satisfies production quality requirements from both a technical and business-impact perspective.
+Example response:
 
----
-
-## 📈 Operational API Monitoring
-
-Prometheus and Grafana are used for operational API observability and runtime monitoring.
-
-Tracked metrics include:
-
-- prediction request throughput
-- p95 inference latency
-- response status distribution
-- API success and error rates
+```json
+{
+  "predictions": [
+    {
+      "customer_id": "7590-VHVEG",
+      "churn_probability": 0.52,
+      "customer_value": 358.2,
+      "action": "offer_discount",
+      "expected_value": 46.08
+    }
+  ],
+  "status": "success",
+  "metadata": {
+    "model_name": "churn-prediction-model",
+    "serving_alias": "champion",
+    "release_id": "release-...",
+    "model_version": "1"
+  }
+}
+```
 
 <p align="center">
-  <img src="docs/images/grafana_dashboard.png" width="100%">
+  <img src="docs/images/swagger_ui.png" width="100%" alt="FastAPI Swagger UI">
 </p>
 
 ---
 
-## 🕒 Delayed Label Handling
+## 💰 Business Decision Logic
 
-The monitoring pipeline supports delayed ground-truth availability.
+The API translates probabilities into retention decisions instead of returning only raw model scores.
 
-Predictions are logged immediately, while true churn labels may only become available days or weeks later.
+Each action can incorporate:
 
-The platform simulates this production scenario by:
-
-- storing pending labels
-- releasing delayed ground truth batches
-- updating cumulative evaluation history
-- recalculating production performance metrics
-
-This mirrors real-world ML systems where outcome labels are not instantly available.
-
----
-
-## 🔁 Automated Pipelines
-
-* training pipelines with Prefect
-* automated retraining workflows
-* model evaluation & promotion
-* MLflow experiment tracking
-* automated model registration
-
----
-
-## ♻️ Reproducibility
-
-The platform emphasizes reproducible ML operations through:
-
-- dataset versioning
-- feature snapshots
-- configuration-driven environments
-- MLflow artifact tracking
-- versioned model promotion
-- infrastructure-as-code
-
-Training datasets, processed features and model artifacts are versioned to support traceable and reproducible production workflows.
-
----
-
-## 🔒 Security & Reliability
-
-* Trivy container vulnerability scanning
-* smoke tests before deployment
-* automated linting & testing
-* non-root Docker containers
-* Workload Identity Federation authentication
-* reproducible deployments
-* configuration-driven environments
-
----
-
-# 🔄 Continuous ML Lifecycle
-
-This platform demonstrates a complete production ML lifecycle:
-
-1. model is trained and registered
-2. prediction API serves live requests
-3. predictions and metadata are logged
-4. monitoring detects degradation or drift
-5. retraining pipeline is triggered
-6. improved model is promoted and deployed
-
-This lifecycle is demonstrated through local demo scripts that simulate inference batches, delayed label availability, performance monitoring and retraining decisions.
-
-The goal is not static ML models — but continuously monitored and maintainable ML systems.
-
----
-
-# 🔁 When Retraining Happens
-
-Retraining is triggered when monitoring detects that the current champion model no longer meets defined production quality thresholds.
-
-The system evaluates retraining based on:
-
-- minimum number of labeled samples
-- F1 score
-- recall
-- ROC AUC
-- Brier score
-- explicit monitoring trigger flags
-
-Example retraining thresholds:
-
-```yaml
-min_f1: 0.60
-min_recall: 0.65
-min_roc_auc: 0.75
-max_brier_score: 0.22
-```
-
-If the latest labeled performance window falls below these thresholds, the retraining flow is triggered and a new candidate model is trained and evaluated.
-
-A newly trained model is only promoted to the production champion model if it outperforms the currently deployed champion according to the configured evaluation policy. 
-The platform uses a champion/challenger workflow via the MLflow Model Registry.
-
-This prevents automatic promotion of degraded models and ensures stable production behavior.
-
----
-
-# 💰 Business Decision Logic
-
-The API returns more than churn probabilities.
-
-Predictions are converted into business actions using configurable expected-value logic.
-
-For each customer, the system compares possible retention actions:
-
-- send retention email
-- offer discount
-- no action
-
-Each action is evaluated using:
-
-- predicted churn probability
+- churn probability
 - estimated customer value
 - intervention cost
 - expected uplift
-- minimum expected profit threshold
+- minimum expected profit
+- campaign budget
 
-Example business configuration:
+Example configuration:
 
 ```yaml
 customer_value: 100
@@ -403,378 +168,442 @@ discount_uplift: 0.3
 contact_uplift: 0.1
 min_expected_profit: 0.0
 ```
-The API also supports customer prioritization and campaign simulation workflows, allowing churn scores to be translated into ranked retention actions and business-oriented decision scenarios.
+
+The decision engine supports actions such as `offer_discount`, `send_email` and `no_action`. Batch prioritization selects the most valuable interventions under the configured policy and budget.
 
 ---
 
-# 🔁 Reusable Use Cases
+## 🔁 Training, Evaluation and Promotion
 
-Customer churn prediction is used as the example use case in this repository.
+Training and retraining are orchestrated with Prefect. The flow covers:
 
-The same MLOps architecture can be adapted to other supervised ML problems where predictions need to be served, monitored and improved over time, such as:
+1. drift and retraining checks
+2. raw-data preparation and validation
+3. dataset snapshot creation
+4. feature engineering
+5. model training and MLflow logging
+6. classification evaluation
+7. Champion/challenger decision
+8. serving-release publication
+9. API refresh and readiness verification
 
-- lead scoring
-- trial-to-paid conversion prediction
-- customer lifetime value prediction
-- upsell and cross-sell propensity scoring
-- fraud detection or risk scoring
-- support ticket escalation prediction
-- subscription cancellation prediction
-- next-best-action systems
+The first Champion is created explicitly with a bootstrap run. Later forced or monitoring-triggered runs follow the normal promotion policy.
 
-The churn use case is therefore mainly a vehicle for demonstrating reusable MLOps patterns: model serving, experiment tracking, registry-based promotion, monitoring, retraining, business decision logic and CI/CD.
+A Challenger is promoted only if it satisfies the configured absolute quality gates and improves sufficiently over the current Champion. This avoids replacing a stable production model with a merely newer model.
 
----
-
-# ☁️ Infrastructure Stack
-
-## Core Stack
-
-* Python 3.12
-* FastAPI
-* MLflow
-* Prefect
-* scikit-learn
-* Pandas
-* Docker
+<p align="center">
+  <img src="docs/images/prefect_flow.png" width="100%" alt="Prefect training flow">
+</p>
 
 ---
 
-## Cloud & DevOps
+## 📊 Experiment Tracking and Lineage
 
-* GCP Cloud Run
-* GCP Artifact Registry
-* Google Cloud Storage
-* Terraform
-* GitHub Actions
-* Prometheus
-* Grafana
+MLflow tracks parameters, metrics, artifacts and model lineage. Classification metrics include, where applicable:
+
+- accuracy
+- precision
+- recall
+- F1 score
+- ROC AUC
+- Brier score
+- decision threshold
+- business-value metrics
+
+Dataset versions, configuration hashes and Git commits connect each registered model and serving release to the code and data used to create it.
+
+<p align="center">
+  <img src="docs/images/mlflow_run_overview.png" width="100%" alt="MLflow run overview">
+</p>
+
+<p align="center">
+  <img src="docs/images/mlflow_model_details.png" width="90%" alt="MLflow model details">
+</p>
 
 ---
 
-# 📁 Project Structure
+## 📈 Monitoring and Observability
+
+The monitoring layer combines ML, business and service-level signals.
+
+### ML monitoring
+
+- runtime data-quality checks
+- feature-distribution drift
+- delayed ground-truth ingestion
+- rolling classification performance
+- Champion degradation detection
+- retraining eligibility and cooldown state
+
+### Business monitoring
+
+- churn-risk distribution
+- selected retention actions
+- customer value
+- expected campaign value
+- campaign cost and budget use
+
+### API and SLO monitoring
+
+- serving readiness
+- request throughput
+- p50, p95 and p99 latency
+- HTTP 5xx rate
+- service availability
+
+Prometheus evaluates alert rules for API availability, serving-bundle readiness, prediction latency and server-error rate. Alertmanager forwards notifications to the internal receiver, which can optionally deliver them to Slack.
+
+<p align="center">
+  <img src="docs/images/grafana_dashboard.png" width="100%" alt="Grafana SLO dashboard">
+</p>
+
+<p align="center">
+  <img src="docs/images/streamlit_dashboard_overview.png" width="100%" alt="Streamlit monitoring overview">
+</p>
+
+<p align="center">
+  <img src="docs/images/streamlit_dashboard_business.png" width="100%" alt="Streamlit business dashboard">
+</p>
+
+---
+
+## 🕒 Delayed Labels and Guarded Retraining
+
+Predictions are available immediately, while actual churn outcomes may only arrive later. The demo lifecycle reproduces this operational constraint by:
+
+- logging predictions at inference time
+- retaining pending outcomes
+- releasing labels after a configured delay
+- joining outcomes with previous predictions
+- recomputing performance history
+- evaluating retraining signals
+
+Retraining safeguards include:
+
+- minimum labeled sample count
+- evaluation over recent windows
+- persistent degradation signals
+- cooldown after retraining
+- drift-aware execution
+- Champion/challenger promotion gates
+
+Typical policy thresholds include minimum F1, recall and ROC AUC as well as a maximum Brier score. The exact values are configuration-driven.
+
+---
+
+## 🚀 CI/CD and Cloud Deployment
+
+GitHub Actions validates and deploys the project on pushes to `main`.
+
+The pipeline includes:
+
+- Ruff linting
+- unit and integration tests
+- API smoke tests
+- Terraform validation and planning
+- API and MLflow image builds
+- Trivy vulnerability scanning
+- Artifact Registry publishing
+- Cloud Run deployment
+- Workload Identity Federation authentication
+
+The API image is deployed with an immutable Git SHA tag. Infrastructure is managed through Terraform.
+
+<p align="center">
+  <img src="docs/images/CI-Pipeline.png" width="100%" alt="GitHub Actions pipeline">
+</p>
+
+---
+
+## 🔒 Security and Reliability
+
+- API-key-protected inference endpoints
+- non-root application containers
+- Workload Identity Federation instead of static CI credentials
+- container vulnerability scans
+- immutable container tags
+- health and readiness probes
+- checksummed serving artifacts
+- transactional serving-state replacement
+- rollback to a previous validated release
+- configuration separation between local and production environments
+
+---
+
+## ☁️ Technology Stack
+
+### ML and application
+
+- Python 3.12
+- pandas
+- scikit-learn and XGBoost
+- FastAPI and Uvicorn
+- MLflow
+- Prefect
+- Pandera
+
+### Platform and operations
+
+- Docker and Docker Compose
+- PostgreSQL
+- Prometheus
+- Grafana
+- Alertmanager
+- Streamlit
+- GitHub Actions
+- Trivy
+- Terraform
+- Google Cloud Run
+- Google Artifact Registry
+- Google Cloud Storage
+
+---
+
+## 📁 Project Structure
 
 ```text
 .
-├── configs/               # environment & infrastructure configs
-│   ├── dev.yaml
-│   ├── prod.yaml
-│   └── gcp.yaml
-│
-├── src/                   # application source code
-│   ├── api/
-│   ├── data/
-│   ├── deployment/
-│   ├── monitoring/
-│   ├── training/
-│   └── inference/
-│
-├── flows/                 # Prefect orchestration flows
-├── infrastructure/        # Terraform infrastructure
-├── tests/                 # unit & integration tests
-├── docs/                  # diagrams & documentation
-├── scripts/               # helper scripts & demos
-└── .github/workflows/    # CI/CD pipelines
+├── configs/                 # environment, training and monitoring configuration
+├── data/                    # local raw and generated lifecycle data
+├── docs/                    # architecture and operating documentation
+├── flows/                   # Prefect flows and reusable tasks
+├── infrastructure/          # Terraform configuration
+├── monitoring/              # Prometheus, Alertmanager and Grafana configuration
+├── scripts/                 # demos, verification and operational helpers
+├── src/
+│   ├── api/                 # FastAPI contracts and endpoints
+│   ├── data/                # validation, features and versioning
+│   ├── deployment/          # cloud deployment helpers
+│   ├── inference/           # model loading, decisions and serving releases
+│   ├── monitoring/          # ML, business and service monitoring
+│   ├── storage/             # filesystem and cloud storage abstractions
+│   └── training/            # training, evaluation and registration
+├── tests/                   # unit and integration tests
+├── docker-compose.yml
+├── Makefile
+└── pyproject.toml
 ```
 
 ---
 
-# ⚡ Quick Start
+## ⚡ Local Quick Start
 
-The local demo starts the full MLOps stack with Docker Compose:
-
-- FastAPI prediction API
-- MLflow tracking server
-- Prefect orchestration server
-- PostgreSQL backend
-- Prometheus metrics
-- Grafana dashboard
-
-After starting the services, run the training pipeline once to register an initial champion model.
-
-## 1️⃣ Clone repository
-
+### 1. Clone and configure
 
 ```bash
-git clone <your-repo-url>
-cd churn-prediction-mlops
-```
-
----
-
-## 2️⃣ Configure environment
-
-```bash
+git clone https://github.com/SL14-SL/mlops-churn-prediction.git
+cd mlops-churn-prediction
 cp .env.example .env
 ```
 
-Set required variables:
+Set at least a local `API_KEY` in `.env`.
 
-* API_KEY
-* GCP configuration (optional for local development)
+### 2. Create the environment
 
----
+```bash
+make setup
+source .venv/bin/activate
+```
 
-## 3️⃣ Start local services
+### 3. Start local services
 
 ```bash
 make dev-up
+make wait-prefect
 ```
 
-This starts:
+### 4. Bootstrap the first local Champion
 
-* FastAPI
-* MLflow
-* Prefect
-* PostgreSQL
-* Prometheus
-* Grafana
+Use the bootstrap target only when the local MLflow registry is empty:
 
----
+```bash
+make train-bootstrap
+```
 
-## 4️⃣ Run training pipeline
+For later forced training runs:
 
 ```bash
 make train-force
 ```
 
-This executes:
-
-* ingestion
-* validation
-* feature engineering
-* model training
-* MLflow registration
-
----
-
-## 5️⃣ Optional: Run API outside Docker
-
-If you want to run the FastAPI service locally without Docker:
+### 5. Verify local serving
 
 ```bash
-uv run uvicorn src.api.app:app --host 0.0.0.0 --port 8080
+curl -fsS http://localhost:8000/livez | jq .
+curl -fsS http://localhost:8000/readyz | jq .
+make predict-test
 ```
 
----
-
-## 6️⃣ Run tests
+### 6. Run quality checks
 
 ```bash
-pytest tests -v
+make lint
+make test
+docker compose config --quiet
 ```
+
+### 7. Register local Prefect automation
+
+```bash
+make prefect-pool
+make prefect-setup
+make prefect-worker
+```
+
+Local Prefect uses `http://localhost:4200/api`. Production flow targets use the Prefect Cloud URL and API key from `.env`; the two configurations are intentionally separated.
+
 ---
 
-# 🧪 End-to-End Lifecycle Demo
+## 🧪 Churn Lifecycle Demo
 
-The repository includes demo scripts for simulating an operational ML lifecycle:
-
-- daily prediction batches
-- delayed ground-truth label release
-- performance evaluation
-- retraining trigger checks
-- optional automated retraining
-
-After starting the local Docker Compose stack and running the initial training pipeline, execute:
+After the local stack and initial Champion are available:
 
 ```bash
 make demo-churn-lifecycle
 ```
 
-This runs the lifecycle simulation inside the API container and simulates prediction batches, delayed label release, performance evaluation and retraining decisions.
+The demo simulates prediction batches, delayed labels, monitoring refreshes and retraining decisions.
 
 ---
 
-# 🔧 Configuration
+## ☁️ Production Bootstrap and Verification
 
-The platform follows a configuration-driven architecture.
+Production infrastructure is provisioned with Terraform:
 
-## Environment configs
+```bash
+terraform -chdir=infrastructure init
+terraform -chdir=infrastructure fmt -check
+terraform -chdir=infrastructure validate
+terraform -chdir=infrastructure plan
+terraform -chdir=infrastructure apply
+```
 
-* `configs/dev.yaml`
-* `configs/staging.yaml`
-* `configs/prod.yaml`
-* `configs/gcp.yaml`
-* `configs/monitoring.yaml`
-* `configs/training.yaml`
+Required production values are loaded from `.env`, GitHub Variables and GitHub Secrets. Validate the non-secret configuration locally:
+
+```bash
+make debug-prod-env
+make check-prod-env
+```
+
+For an empty production registry:
+
+```bash
+make train-bootstrap-prod
+```
+
+For later forced production training:
+
+```bash
+make train-force-prod
+```
+
+Verify the deployed API:
+
+```bash
+make predict-test-prod
+```
+
+Or inspect the probes directly:
+
+```bash
+API_URL="$(terraform -chdir=infrastructure output -raw prediction_api_url)"
+
+curl -fsS "$API_URL/livez" | jq .
+curl -fsS "$API_URL/readyz" | jq .
+curl -fsS "$API_URL/health" | jq .
+```
+
+`train-bootstrap-prod` is intended only for a fresh production registry. Once a Champion exists, use the normal production training path.
 
 ---
 
-## Environment switching
+## 📈 Main API Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/livez` | Process liveness |
+| `GET` | `/readyz` | Complete serving-bundle readiness and lineage |
+| `GET` | `/health` | Service and active model status |
+| `GET` | `/metrics` | Prometheus metrics |
+| `POST` | `/predict` | Churn prediction and retention decision |
+| `POST` | `/prioritize` | Rank customers by decision value |
+| `POST` | `/prioritize/export` | Export prioritized customers |
+| `POST` | `/campaign/simulate` | Simulate retention campaign impact |
+| `POST` | `/explain` | Explain an individual prediction |
+| `POST` | `/admin/reload-model` | Reload active serving state |
+| `POST` | `/admin/rollback-serving-release` | Activate a previous serving release |
+
+Interactive OpenAPI documentation is available under `/docs`.
+
+---
+
+## 🔧 Configuration
+
+The platform uses environment-specific and domain-specific configuration files, including:
+
+- `configs/dev.yaml`
+- `configs/staging.yaml`
+- `configs/prod.yaml`
+- `configs/gcp.yaml`
+- `configs/training.yaml`
+- monitoring and decision-policy configuration
+
+Runtime environment selection:
 
 ```bash
 APP_ENV=dev
 APP_ENV=prod
 ```
 
----
-
-## Infrastructure configuration
-
-Infrastructure values are injected via:
-
-* GitHub Variables
-* GitHub Secrets
-* environment variables
-
-This enables fully reproducible deployments across environments.
+Secrets such as `API_KEY`, `PREFECT_API_KEY` and optional Slack webhooks must not be committed.
 
 ---
 
-# ☁️ Deployment
+## 📦 Dataset
 
-Infrastructure is provisioned with Terraform.
+The project uses the Telco Customer Churn dataset as a realistic binary-classification example. The dataset is a vehicle for demonstrating reusable MLOps patterns rather than the central deliverable.
 
-Services are deployed automatically via GitHub Actions to:
+The architecture can be adapted to other supervised decisioning systems such as:
 
-* Cloud Run
-* Artifact Registry
-* Google Cloud Storage
-
----
-
-## Terraform
-
-```bash
-cd infrastructure
-terraform init
-terraform apply
-```
+- lead scoring
+- conversion prediction
+- subscription cancellation prediction
+- upsell propensity
+- fraud or risk scoring
+- support escalation prediction
 
 ---
 
-## GitHub Actions
+## ⚠️ Scope and Limitations
 
-CI/CD automatically handles:
+This repository is a production-oriented portfolio blueprint, not a fully managed enterprise platform.
 
-* testing
-* scanning
-* image builds
-* deployment
+For a regulated or large-scale deployment, further controls may include:
 
-on every push to `main`.
+- private networking and authenticated Cloud Run ingress
+- managed relational storage for durable production MLflow state
+- centralized secret rotation
+- organization-wide audit logging
+- formal privacy and retention policies
+- autoscaling and sustained load tests
+- multi-region recovery objectives
+- staged traffic splitting or shadow deployment
 
----
-
-# 📈 API Endpoints
-
-If a live demo deployment is active, the API exposes:
-
-## Swagger Documentation
-
-```text
-https://YOUR_API_URL/docs
-```
+The current cloud setup intentionally favors a compact, reproducible demonstration while implementing the central safety patterns of a production ML lifecycle.
 
 ---
 
-## Health & Readiness Endpoint
-
-```text
-GET https://YOUR_API_URL/livez
-GET https://YOUR_API_URL/readyz
-```
----
-
-## Metrics Endpoint
-
-```text
-GET https://YOUR_API_URL/metrics
-```
-
----
-
-## Prediction Endpoint
-
-```text
-POST https://YOUR_API_URL/predict
-```
-
----
-
-## Explanation Endpoint
-```text
-POST https://YOUR_API_URL/explain
-```
-
----
-
-## Customer Prioritization Endpoint
-```text
-POST https://YOUR_API_URL/prioritize
-```
-
----
-
-# 📦 Dataset
-
-This project uses the Telco Customer Churn dataset as a realistic binary classification use case.
-
-The dataset is not the main focus of the repository. It serves as a concrete example for demonstrating reusable MLOps architecture patterns:
-
-- data validation
-- feature processing
-- model training
-- model registry workflows
-- API inference
-- prediction logging
-- delayed-label evaluation
-- monitoring and retraining
-
-The main focus is operational ML infrastructure, reproducibility and lifecycle automation.
-
----
-
-# 🎯 Project Goals
-
-This repository focuses on the operational layer of machine learning systems:
-
-* production-oriented ML engineering
-* model serving and API deployment
-* experiment tracking and model registry workflows
-* monitoring and observability
-* delayed-label performance evaluation
-* reproducible training and inference pipelines
-* CI/CD for ML services
-* automated retraining and model promotion
-* business decision logic on top of predictions
-
-The emphasis is on reliable ML infrastructure — not just model training or notebook experimentation.
-
----
-
-# ⚠️ Limitations
-
-This repository is a production-oriented portfolio showcase, not a fully managed enterprise platform.
-
-For a real enterprise deployment, I would additionally consider:
-
-- centralized cloud logging and alerting
-- stricter IAM scoping per environment
-- managed secret rotation
-- load testing and explicit SLO definitions
-- automated rollback workflows
-- shadow model evaluation or canary deployment
-- cost monitoring and budget alerts
-- data privacy controls for customer-specific datasets
-- blue/green deployment strategies
-
-The goal of this project is to demonstrate realistic MLOps architecture patterns in a compact and reproducible showcase.
-
----
-
-# 📄 License
+## 📄 License
 
 MIT License
 
 ---
 
-# 👨‍💻 Author
+## 👨‍💻 Author
 
 **Steffen Lauterbach**  
 MLOps Engineer
 
 Focused on production-oriented ML systems, model deployment, monitoring, retraining workflows and cloud-native ML infrastructure.
 
-LinkedIn:  
-https://www.linkedin.com/in/92-steffen-lauterbach
+[LinkedIn](https://www.linkedin.com/in/92-steffen-lauterbach)
