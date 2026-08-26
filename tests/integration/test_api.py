@@ -218,7 +218,6 @@ def test_predict_endpoint_success(
     assert response.status_code == 200
 
     body = response.json()
-
     assert body["status"] == "success"
     assert "predictions" in body
     assert isinstance(
@@ -244,7 +243,7 @@ def test_predict_endpoint_success(
         prediction["expected_value"]
         == 12.3
     )
-
+    assert prediction["customer_id"] == "1234-ABCDE"
     assert "metadata" in body
     assert body["metadata"]["rows"] == 1
     assert (

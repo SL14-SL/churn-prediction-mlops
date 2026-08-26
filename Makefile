@@ -263,6 +263,14 @@ upload-raw-prod: check-prod-env ## Upload raw churn data to production GCS bucke
 	@echo "✅ Raw data uploaded."
 	gcloud storage ls gs://$(GCP_BUCKET_NAME)/data/raw/
 
+predict-test-prod: check-prod-env ## Send a sample prediction request to the production API
+	@echo "🧪 Sending production test prediction request..."
+	@curl -fsS -X POST "$(PREDICTION_API_URL)" \
+		-H "Content-Type: application/json" \
+		-H "X-API-KEY: $(API_KEY)" \
+		-d '{"context":{"request_id":"make-predict-test-prod"},"inputs":[{"customerID":"7590-VHVEG","gender":"Female","SeniorCitizen":0,"Partner":"Yes","Dependents":"No","tenure":1,"PhoneService":"No","MultipleLines":"No phone service","InternetService":"DSL","OnlineSecurity":"No","OnlineBackup":"Yes","DeviceProtection":"No","TechSupport":"No","StreamingTV":"No","StreamingMovies":"No","Contract":"Month-to-month","PaperlessBilling":"Yes","PaymentMethod":"Electronic check","MonthlyCharges":29.85,"TotalCharges":"29.85"}]}' \
+		| jq .
+
 train-bootstrap-prod: prepare-mlflow-prod-demo upload-raw-prod ## Bootstrap initial production Champion
 	@echo "🌱 Bootstrapping initial production Champion..."
 	@set -eu; \

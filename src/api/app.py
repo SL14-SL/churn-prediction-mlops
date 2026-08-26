@@ -557,7 +557,10 @@ def predict(payload: PredictionRequest):
             decision_threshold=bundle.decision_threshold,
         )
 
-        results = output["results"]
+        results = attach_customer_ids(
+            payload.inputs,
+            output["results"],
+        )
 
         for features, result in zip(payload.inputs, results):
             log_prediction(
