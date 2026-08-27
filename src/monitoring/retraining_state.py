@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+import fsspec
+import pandas as pd
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,9 @@ from src.monitoring.retraining_policy import (
 RETRAINING_STATE_FILENAME = (
     "retraining_state.json"
 )
+RETRAINING_EVENT_HISTORY_FILENAME = (
+    "retraining_event_history.parquet"
+)
 
 
 def get_retraining_state_path() -> str:
@@ -24,7 +28,48 @@ def get_retraining_state_path() -> str:
         RETRAINING_STATE_FILENAME,
     )
 
+def get_retraining_event_history_path() -> str:
+    return join_uri(
+        get_path("monitoring"),
+        RETRAINING_EVENT_HISTORY_FILENAME,
+    )
 
+def append_retraining_event(
+    event: dict[str, Any],
+) -> pd.DataFrame:
+    """
+    Append one completed retraining event.
+
+    The event history is separate from performance history because
+    performance windows may be rebuilt from delayed-label batches.
+    """
+    path = get_retraining_event_history_path()
+    new_row = pd.DataFrame([event])
+
+    if file_exists(path):
+        with fsspec.open(path, "rb") as file:
+            history = pd.read_parquet(file)
+
+        history = pd.concat(
+            [history, new_row],
+            ignore_index=True,
+        )
+    else:
+        history = new_row
+
+    if "decision_id" in history.columns:
+        history = history.drop_duplicates(
+            subset=["decision_id"],
+            keep="last",
+        ).reset_index(drop=True)
+
+    with fsspec.open(path, "wb") as file:
+        history.to_parquet(
+            file,
+            index=False,
+        )
+
+    return history
 def load_retraining_state() -> dict[str, Any]:
     path = get_retraining_state_path()
 
@@ -80,6 +125,9 @@ def record_successful_retraining(
             "candidate_run_id."
         )
 
+    actual_retrained_at_utc = (
+        datetime.now(timezone.utc).isoformat()
+    )
     simulated_retrained_at_utc = None
 
     if simulated_retrained_at is not None:
@@ -102,9 +150,7 @@ def record_successful_retraining(
             decision.decision_id
         ),
         "last_retrained_at_utc": (
-            datetime.now(
-                timezone.utc
-            ).isoformat()
+            actual_retrained_at_utc
         ),
         "simulated_retrained_at_utc": (
             simulated_retrained_at_utc
@@ -156,6 +202,56 @@ def record_successful_retraining(
             indent=2,
             sort_keys=True,
         ),
+    )
+
+    event_at_utc = (
+        simulated_retrained_at_utc
+        or actual_retrained_at_utc
+    )
+
+    append_retraining_event(
+        {
+            "event_at_utc": event_at_utc,
+            "actual_retrained_at_utc": (
+                actual_retrained_at_utc
+            ),
+            "simulated_retrained_at_utc": (
+                simulated_retrained_at_utc
+            ),
+            "decision_id": (
+                decision.decision_id
+            ),
+            "performance_window_end": (
+                decision.evidence.get(
+                    "performance_window_end"
+                )
+            ),
+            "drift_window_end": (
+                decision.evidence.get(
+                    "drift_window_end"
+                )
+            ),
+            "candidate_run_id": (
+                candidate_run_id
+            ),
+            "final_refit_run_id": (
+                training_result.get(
+                    "final_refit_run_id"
+                )
+            ),
+            "champion_promoted": bool(
+                training_result.get(
+                    "champion_promoted",
+                    False,
+                )
+            ),
+            "trigger_types": json.dumps(
+                list(decision.trigger_types)
+            ),
+            "reasons": json.dumps(
+                list(decision.reasons)
+            ),
+        }
     )
 
     return payload

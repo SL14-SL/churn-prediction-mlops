@@ -75,6 +75,7 @@ def test_successful_retraining_is_persisted(
     monkeypatch,
 ):
     mock_write = MagicMock()
+    mock_append_event = MagicMock()
 
     monkeypatch.setattr(
         retraining_state,
@@ -90,6 +91,12 @@ def test_successful_retraining_is_persisted(
         retraining_state,
         "write_text",
         mock_write,
+    )
+
+    monkeypatch.setattr(
+        retraining_state,
+        "append_retraining_event",
+        mock_append_event,
     )
 
     result = (
@@ -121,6 +128,19 @@ def test_successful_retraining_is_persisted(
         "gt-batch-001",
         "gt-batch-002",
     ]
+    mock_append_event.assert_called_once()
+
+    event = (
+        mock_append_event.call_args.args[0]
+    )
+
+    assert event["decision_id"] == (
+        "retrain-test-123"
+    )
+    assert event["candidate_run_id"] == (
+        "run-123"
+    )
+    assert event["champion_promoted"] is False
 
 
 def test_result_without_candidate_is_rejected(
@@ -192,3 +212,52 @@ def test_simulated_retraining_time_is_persisted(
     assert persisted[
         "simulated_retrained_at_utc"
     ] == simulated_time.isoformat()
+
+
+def test_retraining_event_is_appended(
+    monkeypatch,
+    tmp_path,
+):
+    event_path = (
+        tmp_path
+        / "retraining_event_history.parquet"
+    )
+
+    monkeypatch.setattr(
+        retraining_state,
+        "get_retraining_event_history_path",
+        MagicMock(
+            return_value=str(event_path)
+        ),
+    )
+
+    event = {
+        "event_at_utc": (
+            "2026-08-15T12:00:00+00:00"
+        ),
+        "decision_id": "retrain-test-123",
+        "candidate_run_id": "run-123",
+        "champion_promoted": False,
+    }
+
+    first = (
+        retraining_state
+        .append_retraining_event(event)
+    )
+    second = (
+        retraining_state
+        .append_retraining_event(
+            {
+                **event,
+                "champion_promoted": True,
+            }
+        )
+    )
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert bool(
+        second.iloc[0][
+            "champion_promoted"
+        ]
+    ) is True
