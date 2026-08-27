@@ -196,7 +196,11 @@
       "fieldConfig": {
         "defaults": {
           "decimals": 2,
-          "unit": "reqpm"
+          "unit": "reqpm",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
         },
         "overrides": []
       },
