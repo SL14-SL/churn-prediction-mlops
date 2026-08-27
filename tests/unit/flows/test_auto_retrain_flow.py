@@ -189,6 +189,13 @@ def test_training_success_persists_state(
         force_run=True
     )
     mock_record.assert_called_once()
+    record_kwargs = (
+        mock_record.call_args.kwargs
+    )
+
+    assert record_kwargs[
+        "simulated_retrained_at"
+    ] is None
     assert result["status"] == "retrained"
     assert result["candidate_run_id"] == (
         "run-123"

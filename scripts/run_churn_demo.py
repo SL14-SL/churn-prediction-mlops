@@ -6,6 +6,7 @@ import subprocess
 import fsspec
 import pandas as pd
 
+from datetime import datetime, timezone, timedelta
 from src.configs.loader import file_exists, get_path
 from src.utils.logger import get_logger
 
@@ -47,14 +48,37 @@ def run_command(cmd: list[str], description: str) -> None:
         check=True,
     )
 
+def parse_start_at(
+    value: str,
+) -> datetime:
+    parsed = datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(
+            tzinfo=timezone.utc
+        )
+
+    return parsed.astimezone(
+        timezone.utc
+    )
 
 def run_demo(
     *,
     batch_size: int,
     max_days: int,
     label_delay_days: int,
+    start_at: datetime,
 ) -> None:
     for day in range(1, max_days + 1):
+        evaluated_at = (
+            start_at
+            + timedelta(days=day - 1)
+        )
+        evaluated_at_iso = (
+            evaluated_at.isoformat()
+        )
         remaining = remaining_rows()
 
         if remaining <= 0:
@@ -100,13 +124,29 @@ def run_demo(
             continue
 
         run_command(
-            ["python", "scripts/run_performance_demo.py"],
+            [
+                "python",
+                "scripts/run_performance_demo.py",
+                "--simulation-day",
+                str(day),
+                "--evaluated-at",
+                evaluated_at_iso,
+            ],
             f"Evaluating churn performance for day {day}",
         )
 
         run_command(
-            ["uv", "run", "--no-sync", "python", "-m", "flows.auto_retrain_flow"],
-            f"Running auto-retrain decision for day {day}",
+            [
+                "python",
+                "-m",
+                "flows.auto_retrain_flow",
+                "--evaluated-at",
+                evaluated_at_iso,
+            ],
+            (
+                "Running auto-retrain decision "
+                f"for day {day}"
+            ),
         )
 
 
@@ -115,11 +155,16 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--max-days", type=int, default=10)
     parser.add_argument("--label-delay-days", type=int, default=1)
-
+    parser.add_argument(
+        "--start-at",
+        type=parse_start_at,
+        default=datetime.now(timezone.utc),
+    )
     args = parser.parse_args()
 
     run_demo(
         batch_size=args.batch_size,
         max_days=args.max_days,
         label_delay_days=args.label_delay_days,
+        start_at=args.start_at,
     )

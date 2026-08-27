@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-
+import argparse
 import fsspec
 from mlflow.tracking import MlflowClient
 import pandas as pd
@@ -176,8 +176,29 @@ def join_predictions_with_ground_truth(
 
     return joined
 
+def parse_evaluated_at(
+    value: str,
+) -> datetime:
+    parsed = datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
 
-def compute_churn_metrics(joined: pd.DataFrame, decision_threshold: float) -> dict:
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(
+            tzinfo=timezone.utc
+        )
+
+    return parsed.astimezone(
+        timezone.utc
+    )
+
+def compute_churn_metrics(
+    joined: pd.DataFrame,
+    decision_threshold: float,
+    *,
+    simulation_day: int | None = None,
+    evaluated_at: datetime | None = None,
+) -> dict:
     """
     Compute churn classification, calibration, and business metrics.
     """
@@ -196,8 +217,15 @@ def compute_churn_metrics(joined: pd.DataFrame, decision_threshold: float) -> di
             window_start = ts.min().isoformat()
             window_end = ts.max().isoformat()
 
+    evaluation_time = (
+        evaluated_at
+        or datetime.now(timezone.utc)
+    )
     metrics = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": (
+            evaluation_time.isoformat()
+        ),
+        "simulation_day": simulation_day,
         "window_start": window_start,
         "window_end": window_end,
         "n_samples": int(len(joined)),
@@ -210,7 +238,9 @@ def compute_churn_metrics(joined: pd.DataFrame, decision_threshold: float) -> di
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "brier_score": float(brier_score_loss(y_true, y_prob)),
         "expected_profit": float(joined["expected_profit"].sum()),
+        "performance_threshold_breached": False,
         "retrain_triggered": False,
+        "retraining_executed": False,
         "champion_promoted": False,
     }
 
@@ -278,7 +308,11 @@ def append_performance_history(metrics: dict) -> pd.DataFrame:
     return history
 
 
-def main() -> None:
+def main(
+    *,
+    simulation_day: int | None = None,
+    evaluated_at: datetime | None = None,
+) -> None:
     """
     Run one churn performance evaluation cycle.
     """
@@ -289,9 +323,16 @@ def main() -> None:
     joined = join_predictions_with_ground_truth(predictions, ground_truth)
 
     decision_threshold = load_champion_decision_threshold()
-    metrics = compute_churn_metrics(joined, decision_threshold)
-
+    metrics = compute_churn_metrics(
+        joined,
+        decision_threshold,
+        simulation_day=simulation_day,
+        evaluated_at=evaluated_at,
+    )
     retrain_needed, retrain_reason = should_retrain(metrics)
+    metrics[
+        "performance_threshold_breached"
+    ] = retrain_needed
     metrics["retrain_triggered"] = retrain_needed
     metrics["retrain_reason"] = retrain_reason
 
@@ -313,4 +354,22 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--simulation-day",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--evaluated-at",
+        type=parse_evaluated_at,
+        default=None,
+    )
+
+    args = parser.parse_args()
+
+    main(
+        simulation_day=args.simulation_day,
+        evaluated_at=args.evaluated_at,
+    )

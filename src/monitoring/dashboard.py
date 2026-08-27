@@ -284,55 +284,78 @@ def build_uplift_sensitivity_heatmap(df: pd.DataFrame) -> go.Figure:
 
     return fig
 
-def build_performance_history_chart(df: pd.DataFrame) -> go.Figure:
-    """Build model performance trend chart."""
-    fig = go.Figure()
+def build_performance_history_chart(
+    df: pd.DataFrame,
+) -> go.Figure:
+    """Build the model performance trend by simulation day."""
+    chart_df = df.reset_index(drop=True).copy()
+    chart_df["simulation_day"] = range(
+        1,
+        len(chart_df) + 1,
+    )
 
-    x_values = df["timestamp"] if "timestamp" in df.columns else df.index
+    fig = go.Figure()
 
     for col, label in [
         ("f1_score", "F1 Score"),
         ("recall", "Recall"),
         ("precision", "Precision"),
         ("roc_auc", "ROC AUC"),
+        ("brier_score", "Brier Score"),
     ]:
-        if col in df.columns:
+        if col in chart_df.columns:
             fig.add_trace(
                 go.Scatter(
-                    x=x_values,
-                    y=df[col],
+                    x=chart_df["simulation_day"],
+                    y=chart_df[col],
                     mode="lines+markers",
                     name=label,
                 )
             )
 
-    if "retrain_triggered" in df.columns and "f1_score" in df.columns:
-        retrain_df = df[df["retrain_triggered"]]
-        if not retrain_df.empty:
-            retrain_x = retrain_df["timestamp"] if "timestamp" in retrain_df.columns else retrain_df.index
+    if (
+        "retrain_triggered" in chart_df.columns
+        and "f1_score" in chart_df.columns
+    ):
+        recommended_df = chart_df[
+            chart_df["retrain_triggered"].fillna(False)
+        ]
+
+        if not recommended_df.empty:
             fig.add_trace(
                 go.Scatter(
-                    x=retrain_x,
-                    y=retrain_df["f1_score"],
+                    x=recommended_df["simulation_day"],
+                    y=recommended_df["f1_score"],
                     mode="markers",
-                    name="Retrain Triggered",
-                    marker=dict(size=14, symbol="x"),
+                    name="Retraining Recommended",
+                    marker={
+                        "size": 12,
+                        "symbol": "x",
+                        "color": "#FFA15A",
+                    },
                 )
             )
 
-    if "champion_promoted" in df.columns and "f1_score" in df.columns:
-        promoted_df = df[df["champion_promoted"]]
+    if (
+        "champion_promoted" in chart_df.columns
+        and "f1_score" in chart_df.columns
+    ):
+        promoted_df = chart_df[
+            chart_df["champion_promoted"].fillna(False)
+        ]
+
         if not promoted_df.empty:
-            promoted_x = (
-                promoted_df["timestamp"] if "timestamp" in promoted_df.columns else promoted_df.index
-            )
             fig.add_trace(
                 go.Scatter(
-                    x=promoted_x,
+                    x=promoted_df["simulation_day"],
                     y=promoted_df["f1_score"],
                     mode="markers",
                     name="Champion Promoted",
-                    marker=dict(size=16, symbol="star"),
+                    marker={
+                        "size": 16,
+                        "symbol": "star",
+                        "color": "#00CC96",
+                    },
                 )
             )
 
@@ -340,9 +363,18 @@ def build_performance_history_chart(df: pd.DataFrame) -> go.Figure:
         height=500,
         template="plotly_dark",
         hovermode="x unified",
-        xaxis_title="Time",
-        yaxis_title="Metric Value",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis_title="Simulation day",
+        yaxis_title="Metric value",
+        xaxis={
+            "dtick": 1,
+        },
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
     )
 
     return fig
@@ -362,7 +394,8 @@ tab1, tab2 = st.tabs(["Performance", "Costs"])
 with tab1:
     st.title("🛡️ Churn Prediction - Adaptive Monitoring")
     st.markdown(
-        "Monitoring für Churn-Risiko, Modellqualität, Retention-Aktionen und Business Impact."
+        "Monitoring churn risk, model quality, "
+        "retention actions, and business impact."
     )
 
 ############################################################################################

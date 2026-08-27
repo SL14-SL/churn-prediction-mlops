@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+from datetime import datetime, timezone
 from typing import Any
 
 from prefect import (
@@ -19,6 +21,22 @@ from src.monitoring.retraining_state import (
 )
 from src.monitoring.trigger import evaluate_retraining
 from src.monitoring.monitoring_refresh import refresh_monitoring_signals
+
+def parse_evaluated_at(
+    value: str,
+) -> datetime:
+    parsed = datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(
+            tzinfo=timezone.utc
+        )
+
+    return parsed.astimezone(
+        timezone.utc
+    )
 
 @task(name="Refresh Monitoring Signals")
 def task_refresh_monitoring_signals():
@@ -47,15 +65,17 @@ def task_refresh_monitoring_signals():
     return result
 
 @flow(name="Auto Retrain Decision Flow")
-def auto_retrain_flow() -> dict[
-    str,
-    Any,
-]:
+def auto_retrain_flow(
+    evaluated_at: datetime | None = None,
+) -> dict[str, Any]:
+    
     logger = get_run_logger()
 
     task_refresh_monitoring_signals()
 
-    decision = evaluate_retraining()
+    decision = evaluate_retraining(
+        evaluated_at = evaluated_at
+    )
 
     logger.info(
         "Retraining decision evaluated | "
@@ -157,6 +177,9 @@ def auto_retrain_flow() -> dict[
             training_result=(
                 training_result
             ),
+            simulated_retrained_at=(
+                evaluated_at
+            ),
         )
     )
 
@@ -185,4 +208,16 @@ def auto_retrain_flow() -> dict[
 
 
 if __name__ == "__main__":
-    auto_retrain_flow()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--evaluated-at",
+        type=parse_evaluated_at,
+        default=None,
+    )
+
+    args = parser.parse_args()
+
+    auto_retrain_flow(
+        evaluated_at=args.evaluated_at
+    )

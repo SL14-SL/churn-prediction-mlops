@@ -336,6 +336,18 @@ def collect_retraining_signals(
         )
     )
 
+    if evaluated_at is not None:
+        simulated_retrained_at = (
+            retraining_state.get(
+                "simulated_retrained_at_utc"
+            )
+        )
+
+        if simulated_retrained_at:
+            last_training_at_utc = str(
+                simulated_retrained_at
+            )
+
     processed_batch_ids = set(
         retraining_state.get(
             "processed_batch_ids",

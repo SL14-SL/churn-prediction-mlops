@@ -61,6 +61,7 @@ def record_successful_retraining(
     *,
     decision: RetrainingDecision,
     training_result: dict[str, Any],
+    simulated_retrained_at: datetime | None = None,
 ) -> dict[str, Any]:
     """
     Persist state only after the training pipeline returned successfully.
@@ -79,6 +80,22 @@ def record_successful_retraining(
             "candidate_run_id."
         )
 
+    simulated_retrained_at_utc = None
+
+    if simulated_retrained_at is not None:
+        if simulated_retrained_at.tzinfo is None:
+            simulated_retrained_at = (
+                simulated_retrained_at.replace(
+                    tzinfo=timezone.utc
+                )
+            )
+
+        simulated_retrained_at_utc = (
+            simulated_retrained_at.astimezone(
+                timezone.utc
+            ).isoformat()
+        )
+
     payload = {
         "schema_version": 1,
         "last_decision_id": (
@@ -88,6 +105,9 @@ def record_successful_retraining(
             datetime.now(
                 timezone.utc
             ).isoformat()
+        ),
+        "simulated_retrained_at_utc": (
+            simulated_retrained_at_utc
         ),
         "action": decision.action.value,
         "trigger_types": list(

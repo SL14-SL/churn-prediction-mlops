@@ -1,6 +1,6 @@
 import json
 from unittest.mock import MagicMock
-
+from datetime import datetime, timezone
 import pytest
 
 from src.monitoring import retraining_state
@@ -142,3 +142,53 @@ def test_result_without_candidate_is_rejected(
                 "champion_promoted": False,
             },
         )
+
+def test_simulated_retraining_time_is_persisted(
+    monkeypatch,
+):
+    mock_write = MagicMock()
+
+    monkeypatch.setattr(
+        retraining_state,
+        "get_retraining_state_path",
+        MagicMock(
+            return_value=(
+                "data/monitoring/"
+                "retraining_state.json"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        retraining_state,
+        "write_text",
+        mock_write,
+    )
+
+    simulated_time = datetime(
+        2026,
+        8,
+        15,
+        12,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    retraining_state.record_successful_retraining(
+        decision=decision(),
+        training_result={
+            "candidate_run_id": "run-123",
+            "final_refit_run_id": None,
+            "champion_promoted": False,
+        },
+        simulated_retrained_at=(
+            simulated_time
+        ),
+    )
+
+    persisted = json.loads(
+        mock_write.call_args.args[1]
+    )
+
+    assert persisted[
+        "simulated_retrained_at_utc"
+    ] == simulated_time.isoformat()
