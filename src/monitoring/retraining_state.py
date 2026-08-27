@@ -107,7 +107,9 @@ def record_successful_retraining(
     decision: RetrainingDecision,
     training_result: dict[str, Any],
     simulated_retrained_at: datetime | None = None,
+    simulation_day: int | None = None,
 ) -> dict[str, Any]:
+    
     """
     Persist state only after the training pipeline returned successfully.
 
@@ -192,7 +194,8 @@ def record_successful_retraining(
                 "batch_ids",
                 (),
             )
-        )
+        ),
+        "simulation_day": simulation_day,
     }
 
     write_text(

@@ -142,6 +142,8 @@ def run_demo(
                 "flows.auto_retrain_flow",
                 "--evaluated-at",
                 evaluated_at_iso,
+                "--simulation-day",
+                str(day),
             ],
             (
                 "Running auto-retrain decision "

@@ -27,6 +27,9 @@ CUMULATIVE_GT_FILE = Path(PROJECT_ROOT) / "data" / "monitoring" / "cumulative_gr
 PERFORMANCE_HISTORY_FILE = (
     Path(PROJECT_ROOT) / "data" / "monitoring" / "churn_performance_history.parquet"
 )
+RETRAINING_EVENT_HISTORY_FILE = (
+    Path(PROJECT_ROOT) / "data" / "monitoring" / "retraining_event_history.parquet"
+)
 PROFIT_CURVE_FILE = Path(PROJECT_ROOT) / "data" / "monitoring" / "profit_curve.parquet"
 UPLIFT_SENSITIVITY_FILE = (
     Path(PROJECT_ROOT) / "data" / "monitoring" / "uplift_sensitivity.csv"
@@ -94,6 +97,37 @@ def load_performance_history() -> pd.DataFrame | None:
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
 
     return df
+
+def load_retraining_event_history(
+) -> pd.DataFrame | None:
+    """Load completed retraining lifecycle events."""
+    if not RETRAINING_EVENT_HISTORY_FILE.exists():
+        return None
+
+    events = pd.read_parquet(
+        RETRAINING_EVENT_HISTORY_FILE
+    )
+
+    if events.empty:
+        return None
+
+    for column in [
+        "event_at_utc",
+        "actual_retrained_at_utc",
+        "simulated_retrained_at_utc",
+        "performance_window_end",
+        "drift_window_end",
+    ]:
+        if column in events.columns:
+            events[column] = pd.to_datetime(
+                events[column],
+                utc=True,
+                errors="coerce",
+            )
+
+    return events.sort_values(
+        "event_at_utc"
+    ).reset_index(drop=True)
 
 def load_profit_curve() -> pd.DataFrame | None:
     """Load offline profit curve simulation."""
@@ -286,13 +320,40 @@ def build_uplift_sensitivity_heatmap(df: pd.DataFrame) -> go.Figure:
 
 def build_performance_history_chart(
     df: pd.DataFrame,
+    retraining_events: pd.DataFrame | None = None,
 ) -> go.Figure:
+    
     """Build the model performance trend by simulation day."""
+
     chart_df = df.reset_index(drop=True).copy()
-    chart_df["simulation_day"] = range(
-        1,
-        len(chart_df) + 1,
-    )
+
+    if "simulation_day" in chart_df.columns:
+        chart_df["simulation_day"] = (
+            pd.to_numeric(
+                chart_df["simulation_day"],
+                errors="coerce",
+            )
+        )
+
+    if (
+        "simulation_day" not in chart_df.columns
+        or chart_df["simulation_day"].isna().all()
+    ):
+        chart_df["simulation_day"] = range(
+            1,
+            len(chart_df) + 1,
+        )
+    else:
+        fallback_days = pd.Series(
+            range(1, len(chart_df) + 1),
+            index=chart_df.index,
+        )
+
+        chart_df["simulation_day"] = (
+            chart_df["simulation_day"]
+            .fillna(fallback_days)
+            .astype(int)
+        )
 
     fig = go.Figure()
 
@@ -314,50 +375,144 @@ def build_performance_history_chart(
             )
 
     if (
-        "retrain_triggered" in chart_df.columns
+        retraining_events is not None
+        and not retraining_events.empty
         and "f1_score" in chart_df.columns
     ):
-        recommended_df = chart_df[
-            chart_df["retrain_triggered"].fillna(False)
-        ]
 
-        if not recommended_df.empty:
+        time_column = None
+
+        for candidate in [
+            "timestamp",
+            "computed_at",
+        ]:
+            if candidate in chart_df.columns:
+                time_column = candidate
+                break
+
+        if time_column is not None:
+            chart_df["_event_time"] = (
+                pd.to_datetime(
+                    chart_df[time_column],
+                    utc=True,
+                    errors="coerce",
+                )
+            )
+
+        legend_added = False
+        promotion_legend_added = False
+
+        for _, event in (
+            retraining_events.iterrows()
+        ):
+            event_time = pd.to_datetime(
+                event.get("event_at_utc"),
+                utc=True,
+                errors="coerce",
+            )
+
+            stored_simulation_day = (
+                event.get("simulation_day")
+            )
+
+            if pd.notna(stored_simulation_day):
+                matching_rows = chart_df[
+                    chart_df["simulation_day"]
+                    == int(stored_simulation_day)
+                ]
+
+                if not matching_rows.empty:
+                    event_row = (
+                        matching_rows.iloc[-1]
+                    )
+                else:
+                    event_row = (
+                        chart_df.iloc[-1]
+                    )
+
+            elif (
+                time_column is None
+                or pd.isna(event_time)
+                or chart_df["_event_time"]
+                .isna()
+                .all()
+            ):
+                event_row = chart_df.iloc[-1]
+            else:
+                time_distance = (
+                    chart_df["_event_time"]
+                    - event_time
+                ).abs()
+
+                event_row = chart_df.loc[
+                    time_distance.idxmin()
+                ]
+
+            event_day = int(
+                event_row["simulation_day"]
+            )
+            event_f1 = float(
+                event_row["f1_score"]
+            )
+
             fig.add_trace(
                 go.Scatter(
-                    x=recommended_df["simulation_day"],
-                    y=recommended_df["f1_score"],
+                    x=[event_day],
+                    y=[event_f1],
                     mode="markers",
-                    name="Retraining Recommended",
+                    name="Retraining Executed",
                     marker={
-                        "size": 12,
-                        "symbol": "x",
+                        "size": 14,
+                        "symbol": "diamond",
                         "color": "#FFA15A",
                     },
+                    showlegend=not legend_added,
+                    customdata=[
+                        [
+                            event.get(
+                                "candidate_run_id"
+                            ),
+                            event.get(
+                                "decision_id"
+                            ),
+                        ]
+                    ],
+                    hovertemplate=(
+                        "Simulation day: %{x}<br>"
+                        "F1: %{y:.3f}<br>"
+                        "Candidate run: "
+                        "%{customdata[0]}<br>"
+                        "Decision: "
+                        "%{customdata[1]}"
+                        "<extra></extra>"
+                    ),
                 )
             )
+            legend_added = True
 
-    if (
-        "champion_promoted" in chart_df.columns
-        and "f1_score" in chart_df.columns
-    ):
-        promoted_df = chart_df[
-            chart_df["champion_promoted"].fillna(False)
-        ]
-
-        if not promoted_df.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=promoted_df["simulation_day"],
-                    y=promoted_df["f1_score"],
-                    mode="markers",
-                    name="Champion Promoted",
-                    marker={
-                        "size": 16,
-                        "symbol": "star",
-                        "color": "#00CC96",
-                    },
+            if bool(
+                event.get(
+                    "champion_promoted",
+                    False,
                 )
-            )
+            ):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[event_day],
+                        y=[event_f1],
+                        mode="markers",
+                        name="Champion Promoted",
+                        marker={
+                            "size": 18,
+                            "symbol": "star",
+                            "color": "#00CC96",
+                        },
+                        showlegend=(
+                            not promotion_legend_added
+                        ),
+                    )
+                )
+                promotion_legend_added = True
 
     fig.update_layout(
         height=500,
@@ -384,6 +539,7 @@ prediction_df = load_prediction_log()
 ground_truth_df = load_ground_truth()
 prediction_df = attach_ground_truth(prediction_df, ground_truth_df)
 performance_history_df = load_performance_history()
+retraining_event_history_df = load_retraining_event_history()
 profit_curve_df = load_profit_curve()
 uplift_sensitivity_df = load_uplift_sensitivity()
 
@@ -503,9 +659,12 @@ with tab1:
         if performance_history_df is not None and not performance_history_df.empty:
             st.subheader("📊 Model Performance Trend")
             st.plotly_chart(
-                build_performance_history_chart(performance_history_df),
-                width="stretch",
-            )
+            build_performance_history_chart(
+                performance_history_df,
+                retraining_event_history_df,
+            ),
+            width="stretch",
+        )
 
 
 ############################################################################################

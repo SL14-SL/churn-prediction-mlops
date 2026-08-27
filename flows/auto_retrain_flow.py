@@ -67,6 +67,7 @@ def task_refresh_monitoring_signals():
 @flow(name="Auto Retrain Decision Flow")
 def auto_retrain_flow(
     evaluated_at: datetime | None = None,
+    simulation_day: int | None = None,
 ) -> dict[str, Any]:
     
     logger = get_run_logger()
@@ -180,6 +181,7 @@ def auto_retrain_flow(
             simulated_retrained_at=(
                 evaluated_at
             ),
+            simulation_day=simulation_day,
         )
     )
 
@@ -215,9 +217,15 @@ if __name__ == "__main__":
         type=parse_evaluated_at,
         default=None,
     )
+    parser.add_argument(
+        "--simulation-day",
+        type=int,
+        default=None,
+    )
 
     args = parser.parse_args()
 
     auto_retrain_flow(
-        evaluated_at=args.evaluated_at
+        evaluated_at=args.evaluated_at,
+        simulation_day=args.simulation_day,
     )
