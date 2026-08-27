@@ -15,8 +15,8 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	prefect-setup prefect-worker train train-force train-bootstrap \
 	auto-retrain predict-test demo-churn-lifecycle reset-local-stack \
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
-	train-bootstrap-prod train-force-prod test lint clean clean-venv \
-	clean-data clean-all reset-demo
+	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
+	test lint clean clean-venv clean-data clean-all reset-demo
 
 # --- Main Entry Point ---
 
@@ -191,6 +191,7 @@ demo-churn-lifecycle: wait-prefect ## Run local churn lifecycle demo
 		--label-delay-days 1
 
 # --- Production Helpers ---
+PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))
 
 check-prod-env: ## Validate required production environment variables
 	@echo "🔎 Validating production environment..."
@@ -311,6 +312,22 @@ train-force-prod: check-prod-env ## Execute forced training against production c
 	GCP_PROJECT_ID="$(GCP_PROJECT_ID)" \
 	API_KEY="$(API_KEY)" \
 	uv run --active python flows/training_flow.py --force
+
+verify-prod: check-prod-env ## Verify production liveness, readiness, lineage and prediction
+	@echo "🔍 Verifying production deployment..."
+	@PYTHONPATH=. \
+	APP_ENV=prod \
+	PRODUCTION_API_URL="$(PRODUCTION_API_BASE_URL)" \
+	MLFLOW_TRACKING_URI="$(MLFLOW_UI_URL)" \
+	PREDICTION_API_URL="$(PREDICTION_API_URL)" \
+	GCP_BUCKET_NAME="$(GCP_BUCKET_NAME)" \
+	GCP_PROJECT_ID="$(GCP_PROJECT_ID)" \
+	API_KEY="$(API_KEY)" \
+	uv run --active python \
+		scripts/verify_production_deployment.py
+
+bootstrap-and-verify-prod: train-bootstrap-prod verify-prod ## Bootstrap and verify a fresh production demo
+	@echo "✅ Production bootstrap and semantic verification completed."
 
 # --- Quality Assurance ---
 
