@@ -15,6 +15,49 @@ def cast_numeric_types(df: pd.DataFrame, columns: list) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
+def add_churn_domain_features(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Add validated churn-specific tenure features.
+
+    These features are available at prediction time and do not use
+    target information or future data.
+    """
+    df = df.copy()
+
+    if "tenure" not in df.columns:
+        return df
+
+    tenure = pd.to_numeric(
+        df["tenure"],
+        errors="coerce",
+    ).fillna(0.0)
+
+    df["tenure_group"] = pd.cut(
+        tenure,
+        bins=[
+            -1,
+            6,
+            12,
+            24,
+            48,
+            float("inf"),
+        ],
+        labels=[
+            "0_6_months",
+            "7_12_months",
+            "13_24_months",
+            "25_48_months",
+            "49_plus_months",
+        ],
+    ).astype("string")
+
+    df["is_new_customer"] = (
+        tenure <= 12
+    ).astype(int)
+
+    return df
 
 def encode_categoricals(df: pd.DataFrame, columns: list) -> pd.DataFrame:
     """

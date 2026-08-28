@@ -16,12 +16,18 @@ def training_config() -> dict:
             "enabled_steps": [
                 "clean_names",
                 "cast_numeric_types",
+                "add_churn_domain_features",
                 "encode_categoricals",
                 "drop_configured",
                 "cast_ohe_to_bool",
             ],
             "cast_to_numeric": ["totalcharges"],
-            "numeric_columns": ["tenure", "monthlycharges", "totalcharges"],
+            "numeric_columns": [
+                "tenure", 
+                "monthlycharges", 
+                "totalcharges",
+                "is_new_customer",
+            ],
             "categorical_columns": [
                 "gender",
                 "seniorcitizen",
@@ -39,6 +45,7 @@ def training_config() -> dict:
                 "contract",
                 "paperlessbilling",
                 "paymentmethod",
+                "tenure_group",
             ],
             "drop_columns": ["customerid"],
         },
@@ -114,6 +121,31 @@ def test_build_features_churn_pipeline(training_config, churn_df):
     assert "paymentmethod_Mailed check" in result.columns
 
     assert pd.api.types.is_bool_dtype(result["gender_Male"])
+    assert "is_new_customer" in result.columns
+
+    assert (
+        result.loc[
+            0,
+            "is_new_customer",
+        ]
+        == 1
+    )
+
+    assert (
+        result.loc[
+            1,
+            "is_new_customer",
+        ]
+        == 1
+    )
+
+    assert any(
+        column.startswith(
+            "tenure_group_"
+        )
+        for column in result.columns
+    )
+
 
 
 def test_build_features_without_target_for_inference_like_payload(training_config, churn_df):

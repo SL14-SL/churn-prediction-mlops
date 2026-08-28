@@ -70,9 +70,11 @@ features:
   enabled_steps:
     - clean_names
     - cast_numeric_types
+    - add_churn_domain_features
     - encode_categoricals
     - drop_configured
     - cast_ohe_to_bool
+    
     
   # These columns need to be cast from String to Float (Notebook logic)
   cast_to_numeric:
@@ -83,6 +85,8 @@ features:
     - tenure
     - monthlycharges
     - totalcharges
+    - is_new_customer
+
 
   # Categorical features for One-Hot-Encoding
   categorical_columns:
@@ -102,6 +106,7 @@ features:
     - contract
     - paperlessbilling
     - paymentmethod
+    - tenure_group
 
   # Columns that add no value to the model
   drop_columns:

@@ -28,6 +28,9 @@ def _apply_step(
         cols = feature_cfg.get("cast_to_numeric", [])
         return core.cast_numeric_types(df, cols)
 
+    if step_name == "add_churn_domain_features":
+        return core.add_churn_domain_features(df)
+
     if step_name == "encode_categoricals":
         cols = feature_cfg.get("categorical_columns", [])
         return core.encode_categoricals(df, cols)
