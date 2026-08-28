@@ -254,6 +254,7 @@ def record_successful_retraining(
             "reasons": json.dumps(
                 list(decision.reasons)
             ),
+            "simulation_day": simulation_day,
         }
     )
 
