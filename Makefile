@@ -16,7 +16,8 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	auto-retrain predict-test demo-churn-lifecycle reset-local-stack \
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
-	test lint clean clean-venv clean-data clean-all reset-demo
+	test lint clean clean-venv clean-data clean-all reset-demo \
+	ui-dashboard
 
 # --- Main Entry Point ---
 
@@ -142,6 +143,17 @@ prefect-worker: wait-prefect prefect-pool ## Start Prefect worker for the local 
 
 # --- UI Quicklinks ---
 
+ui-dashboard: ## Start the local Streamlit monitoring dashboard
+	docker compose exec \
+		-e HOME=/tmp \
+		-e STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+		api \
+		uv run --no-sync streamlit run \
+			src/monitoring/dashboard.py \
+			--server.address 0.0.0.0 \
+			--server.port 8501 \
+			--browser.gatherUsageStats false
+			
 ui-prefect: ## Open local Prefect UI in the browser
 	@python3 -m webbrowser http://localhost:4200
 
