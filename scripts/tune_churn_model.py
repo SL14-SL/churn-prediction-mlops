@@ -6,6 +6,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+import xgboost as xgb
 from scipy.stats import loguniform, randint, uniform
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import (
@@ -71,44 +72,130 @@ def load_tuning_data() -> tuple[pd.DataFrame, pd.Series]:
     return X_train, y_train
 
 
-def build_parameter_distributions() -> dict:
-    return {
-        "n_estimators": randint(100, 601),
-        "learning_rate": loguniform(
-            0.01,
-            0.20,
-        ),
-        "max_depth": randint(1, 6),
-        "min_samples_split": randint(
-            2,
-            31,
-        ),
-        "min_samples_leaf": randint(
-            1,
-            31,
-        ),
-        "subsample": uniform(
-            0.65,
-            0.35,
-        ),
-        "max_features": [
-            None,
-            "sqrt",
-            "log2",
-            0.6,
-            0.8,
-        ],
-    }
+def build_search_configuration(
+    *,
+    model_type: str,
+    random_state: int,
+):
+    if model_type == "gradient_boosting":
+        model = (
+            GradientBoostingClassifier(
+                random_state=random_state,
+            )
+        )
+
+        parameter_distributions = {
+            "n_estimators": randint(
+                100,
+                601,
+            ),
+            "learning_rate": loguniform(
+                0.01,
+                0.20,
+            ),
+            "max_depth": randint(
+                1,
+                6,
+            ),
+            "min_samples_split": randint(
+                2,
+                31,
+            ),
+            "min_samples_leaf": randint(
+                1,
+                31,
+            ),
+            "subsample": uniform(
+                0.65,
+                0.35,
+            ),
+            "max_features": [
+                None,
+                "sqrt",
+                "log2",
+                0.6,
+                0.8,
+            ],
+        }
+
+        return (
+            model,
+            parameter_distributions,
+        )
+
+    if model_type == "xgboost":
+        model = xgb.XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            tree_method="hist",
+            random_state=random_state,
+            n_jobs=1,
+        )
+
+        parameter_distributions = {
+            "n_estimators": randint(
+                150,
+                801,
+            ),
+            "learning_rate": loguniform(
+                0.01,
+                0.20,
+            ),
+            "max_depth": randint(
+                2,
+                7,
+            ),
+            "min_child_weight": randint(
+                1,
+                13,
+            ),
+            "subsample": uniform(
+                0.65,
+                0.35,
+            ),
+            "colsample_bytree": uniform(
+                0.60,
+                0.40,
+            ),
+            "gamma": uniform(
+                0.0,
+                0.50,
+            ),
+            "reg_alpha": loguniform(
+                0.0001,
+                2.0,
+            ),
+            "reg_lambda": loguniform(
+                0.10,
+                20.0,
+            ),
+        }
+
+        return (
+            model,
+            parameter_distributions,
+        )
+
+    raise ValueError(
+        f"Unsupported model type: {model_type}"
+    )
 
 
 def tune_model(
     *,
+    model_type: str,
     n_iter: int,
     random_state: int,
 ) -> RandomizedSearchCV:
-    X_train, y_train = load_tuning_data()
+    X_train, y_train = (
+        load_tuning_data()
+    )
 
-    model = GradientBoostingClassifier(
+    (
+        model,
+        parameter_distributions,
+    ) = build_search_configuration(
+        model_type=model_type,
         random_state=random_state,
     )
 
@@ -121,7 +208,7 @@ def tune_model(
     search = RandomizedSearchCV(
         estimator=model,
         param_distributions=(
-            build_parameter_distributions()
+            parameter_distributions
         ),
         n_iter=n_iter,
         scoring={
@@ -153,6 +240,8 @@ def tune_model(
 def save_results(
     search: RandomizedSearchCV,
     output_directory: Path,
+    *,
+    model_type: str,
 ) -> None:
     output_directory.mkdir(
         parents=True,
@@ -171,6 +260,10 @@ def save_results(
     }
 
     summary = {
+        "model_type": model_type,
+        "selection_metric": (
+            "average_precision"
+        ),
         "best_cv_average_precision": (
             float(search.best_score_)
         ),
@@ -244,9 +337,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(
-            "results/churn_tuning"
-        ),
+        default=None,
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=[
+            "gradient_boosting",
+            "xgboost",
+        ],
+        default="gradient_boosting",
     )
 
     return parser.parse_args()
@@ -255,16 +354,27 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    output_directory = (
+        args.output_dir
+        if args.output_dir is not None
+        else (
+            Path("results")
+            / "churn_tuning"
+            / args.model_type
+        )
+    )
+
     search = tune_model(
+        model_type=args.model_type,
         n_iter=args.n_iter,
         random_state=args.random_state,
     )
 
     save_results(
         search,
-        args.output_dir,
+        output_directory,
+        model_type=args.model_type,
     )
-
 
 if __name__ == "__main__":
     main()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-
+import xgboost as xgb
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import (
@@ -27,38 +27,60 @@ from src.training.train import (
 
 
 TRAIN_CFG = load_config("training.yaml")
-
 CANDIDATES = {
-    "baseline": {
-        "n_estimators": 200,
-        "max_depth": 3,
-        "learning_rate": 0.05,
+    "baseline_gradient_boosting": {
+        "model_type": (
+            "gradient_boosting"
+        ),
+        "params": {
+            "n_estimators": 200,
+            "max_depth": 3,
+            "learning_rate": 0.05,
+        },
     },
-    "tuned_rank_1": {
-        "learning_rate": (
-            0.02065005291441002
+    "tuned_gradient_boosting": {
+        "model_type": (
+            "gradient_boosting"
         ),
-        "max_depth": 4,
-        "max_features": "log2",
-        "min_samples_leaf": 24,
-        "min_samples_split": 28,
-        "n_estimators": 500,
-        "subsample": (
-            0.9048757220141508
-        ),
+        "params": {
+            "learning_rate": (
+                0.061428810158596955
+            ),
+            "max_depth": 2,
+            "max_features": "sqrt",
+            "min_samples_leaf": 9,
+            "min_samples_split": 29,
+            "n_estimators": 234,
+            "subsample": (
+                0.9475135022264298
+            ),
+        },
     },
-    "tuned_rank_8": {
-        "learning_rate": (
-            0.061428810158596955
-        ),
-        "max_depth": 2,
-        "max_features": "sqrt",
-        "min_samples_leaf": 9,
-        "min_samples_split": 29,
-        "n_estimators": 234,
-        "subsample": (
-            0.9475135022264298
-        ),
+    "tuned_xgboost": {
+        "model_type": "xgboost",
+        "params": {
+            "colsample_bytree": (
+                0.8460028906796679
+            ),
+            "gamma": (
+                0.49502692505213164
+            ),
+            "learning_rate": (
+                0.015214353605950144
+            ),
+            "max_depth": 4,
+            "min_child_weight": 10,
+            "n_estimators": 535,
+            "reg_alpha": (
+                0.002439498256807585
+            ),
+            "reg_lambda": (
+                8.970458772060821
+            ),
+            "subsample": (
+                0.6978174660047101
+            ),
+        },
     },
 }
 
@@ -266,6 +288,39 @@ def evaluate_at_threshold(
         ),
     }
 
+def build_candidate_model(
+    candidate: dict,
+):
+    model_type = candidate[
+        "model_type"
+    ]
+    parameters = candidate[
+        "params"
+    ]
+
+    if model_type == "gradient_boosting":
+        return (
+            GradientBoostingClassifier(
+                **parameters,
+                random_state=42,
+            )
+        )
+
+    if model_type == "xgboost":
+        return xgb.XGBClassifier(
+            **parameters,
+            objective="binary:logistic",
+            eval_metric="logloss",
+            tree_method="hist",
+            random_state=42,
+            n_jobs=-1,
+        )
+
+    raise ValueError(
+        f"Unsupported model type: "
+        f"{model_type}"
+    )
+
 
 def main() -> None:
     (
@@ -277,14 +332,11 @@ def main() -> None:
 
     results = []
 
-    for name, parameters in (
+    for name, candidate in (
         CANDIDATES.items()
     ):
-        model = (
-            GradientBoostingClassifier(
-                **parameters,
-                random_state=42,
-            )
+        model = build_candidate_model(
+            candidate
         )
 
         model.fit(
@@ -311,27 +363,55 @@ def main() -> None:
             )
         )
 
-        results.append(
+        f1_result = (
             evaluate_at_threshold(
                 model_name=name,
                 strategy="maximum_f1",
                 threshold=f1_threshold,
                 y_true=y_validation,
-                y_probability=probabilities,
+                y_probability=(
+                    probabilities
+                ),
             )
         )
 
+        f1_result["model_type"] = (
+            candidate["model_type"]
+        )
+        f1_result["n_features"] = int(
+            X_train.shape[1]
+        )
+
         results.append(
+            f1_result
+        )
+
+        recall_result = (
             evaluate_at_threshold(
                 model_name=name,
                 strategy=(
                     "maximum_precision_at_"
                     "recall_0.65"
                 ),
-                threshold=recall_threshold,
+                threshold=(
+                    recall_threshold
+                ),
                 y_true=y_validation,
-                y_probability=probabilities,
+                y_probability=(
+                    probabilities
+                ),
             )
+        )
+
+        recall_result["model_type"] = (
+            candidate["model_type"]
+        )
+        recall_result["n_features"] = int(
+            X_train.shape[1]
+        )
+
+        results.append(
+            recall_result
         )
 
     result_df = pd.DataFrame(
