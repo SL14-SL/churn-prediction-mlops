@@ -85,6 +85,9 @@ tfplan-*
 # Keep example variable files
 !example.tfvars
 
+# Local model tuning artifacts
+results/churn_tuning/
+
 # =========================
 # Secrets / Credentials
 # =========================

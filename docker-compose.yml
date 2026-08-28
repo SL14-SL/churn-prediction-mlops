@@ -80,6 +80,7 @@ services:
       - ./data:/app/data
       - ./models:/app/models
       - ./scripts:/app/scripts
+      - ./results:/app/results
     networks:
       - mlops-net
     depends_on:
