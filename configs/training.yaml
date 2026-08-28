@@ -58,11 +58,15 @@ metrics:
   evaluate_on_original_scale: true
 
 promotion:
-  minimum_f1_improvement: 0.005
+  minimum_realized_profit_improvement: 10.0
 
+  maximum_f1_degradation: 0.02
   maximum_recall_degradation: 0.02
   maximum_roc_auc_degradation: 0.01
   maximum_brier_score_increase: 0.01
+
+  business_evaluation:
+    max_discount_rate: 0.20
 
 features:
   features:

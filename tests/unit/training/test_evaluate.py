@@ -71,6 +71,14 @@ def test_compare_models_uses_promotion_policy(
         "recall": 0.80,
         "roc_auc": 0.87,
         "brier_score": 0.14,
+        "expected_profit": 1_045.0,
+        "realized_profit": 1_040.0,
+        "realized_profit_per_action": (
+            4.20
+        ),
+        "intervention_rate": 0.30,
+        "intervention_cost": 240.0,
+        "intervened_churners": 120.0,
     }
 
     champion_metrics = {
@@ -78,19 +86,48 @@ def test_compare_models_uses_promotion_policy(
         "recall": 0.79,
         "roc_auc": 0.86,
         "brier_score": 0.15,
+        "expected_profit": 1_010.0,
+        "realized_profit": 1_000.0,
+        "realized_profit_per_action": (
+            4.00
+        ),
+        "intervention_rate": 0.31,
+        "intervention_cost": 250.0,
+        "intervened_churners": 118.0,
     }
 
     promotion_decision = MagicMock(
         promote=True,
         gates={
-            "f1_improvement": True,
+            (
+                "business_value_"
+                "improvement"
+            ): True,
+            "f1_non_regression": True,
             "recall_non_regression": True,
             "roc_auc_non_regression": True,
-            "brier_score_non_regression": True,
+            (
+                "brier_score_"
+                "non_regression"
+            ): True,
         },
         reasons=(
             "All gates passed.",
         ),
+        evidence={
+            "challenger": (
+                challenger_metrics
+            ),
+            "champion": (
+                champion_metrics
+            ),
+            "deltas": {
+                (
+                    "realized_profit_"
+                    "improvement"
+                ): 40.0,
+            },
+        },
     )
 
     monkeypatch.setattr(
@@ -179,9 +216,48 @@ def test_compare_models_uses_promotion_policy(
         metrics["promotion_gates"]
         == promotion_decision.gates
     )
-
+    assert (
+        metrics[
+            "challenger_realized_profit"
+        ]
+        == 1_040.0
+    )
+    assert (
+        metrics[
+            "champion_realized_profit"
+        ]
+        == 1_000.0
+    )
+    assert (
+        metrics[
+            "challenger_expected_profit"
+        ]
+        == 1_045.0
+    )
+    assert (
+        metrics[
+            "promotion_evidence"
+        ]
+        == promotion_decision.evidence
+    )
     policy.assert_called_once()
 
+    policy_call = (
+        policy.call_args.kwargs
+    )
+
+    assert (
+        policy_call[
+            "challenger_metrics"
+        ]
+        == challenger_metrics
+    )
+    assert (
+        policy_call[
+            "champion_metrics"
+        ]
+        == champion_metrics
+    )
 
 def test_compare_models_uses_bootstrap_policy_without_champion(
     monkeypatch,
@@ -193,6 +269,14 @@ def test_compare_models_uses_bootstrap_policy_without_champion(
         "recall": 0.72,
         "roc_auc": 0.80,
         "brier_score": 0.19,
+        "expected_profit": 920.0,
+        "realized_profit": 900.0,
+        "realized_profit_per_action": (
+            3.50
+        ),
+        "intervention_rate": 0.28,
+        "intervention_cost": 220.0,
+        "intervened_churners": 105.0,
     }
 
     client = MagicMock()
@@ -209,6 +293,12 @@ def test_compare_models_uses_bootstrap_policy_without_champion(
         reasons=(
             "Bootstrap promotion.",
         ),
+        evidence={
+            "challenger": (
+                challenger_metrics
+            ),
+            "champion": None,
+        },
     )
 
     monkeypatch.setattr(
@@ -281,3 +371,21 @@ def test_compare_models_uses_bootstrap_policy_without_champion(
     ] == {
         "bootstrap": True,
     }
+    assert (
+        metrics[
+            "challenger_expected_profit"
+        ]
+        == 920.0
+    )
+    assert (
+        metrics[
+            "challenger_realized_profit"
+        ]
+        == 900.0
+    )
+    assert (
+        metrics[
+            "promotion_evidence"
+        ]
+        == promotion_decision.evidence
+    )

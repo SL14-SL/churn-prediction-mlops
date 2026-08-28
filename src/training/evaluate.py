@@ -3,6 +3,7 @@ import mlflow
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from dataclasses import replace
 from sklearn.metrics import (
     confusion_matrix, 
     f1_score,
@@ -15,6 +16,9 @@ from src.configs.loader import load_config, get_path
 from src.utils.logger import get_logger
 from src.training.utils import build_drop_columns
 from src.training.promotion_policy import PromotionThresholds, evaluate_promotion_policy
+
+from src.inference.decision import DecisionConfig, DecisionEngine
+from src.monitoring.performance import compute_business_metrics
 
 logger = get_logger(__name__)
 
@@ -63,6 +67,121 @@ def predict_with_threshold(model, X_val, threshold: float):
 
     return preds
 
+def calculate_model_business_metrics(
+    *,
+    probabilities,
+    y_true,
+) -> dict[str, float]:
+    """
+    Evaluate a model with the existing retention decision policy.
+
+    Realized profit remains simulated because the dataset does not contain
+    observed treatment effects.
+    """
+    decision_config = (
+        get_business_evaluation_config()
+    )
+    decision_engine = (
+        DecisionEngine(
+            decision_config
+        )
+    )
+
+    decisions = (
+        decision_engine.decide_batch(
+            probabilities.tolist()
+        )
+    )
+
+    evaluation_df = pd.DataFrame(
+        {
+            "churn": (
+                pd.Series(y_true)
+                .reset_index(drop=True)
+                .astype(int)
+            ),
+            "churn_probability": (
+                probabilities
+            ),
+            "action": [
+                decision["action"]
+                for decision in decisions
+            ],
+            "customer_value": [
+                decision[
+                    "customer_value"
+                ]
+                for decision in decisions
+            ],
+        }
+    )
+
+    business_metrics = (
+        compute_business_metrics(
+            evaluation_df,
+            y_true_col="churn",
+            y_proba_col=(
+                "churn_probability"
+            ),
+            action_col="action",
+            customer_value=(
+                decision_config
+                .customer_value
+            ),
+            cost_contact=(
+                decision_config
+                .cost_contact
+            ),
+            cost_discount=(
+                decision_config
+                .cost_discount
+            ),
+            contact_uplift=(
+                decision_config
+                .contact_uplift
+            ),
+            discount_uplift=(
+                decision_config
+                .discount_uplift
+            ),
+        )
+    )
+
+    return {
+        "expected_profit": float(
+            business_metrics[
+                "expected_profit"
+            ]
+        ),
+        "realized_profit": float(
+            business_metrics[
+                "realized_profit"
+            ]
+        ),
+        "realized_profit_per_action": (
+            float(
+                business_metrics[
+                    "realized_profit_per_action"
+                ]
+            )
+        ),
+        "intervention_rate": float(
+            business_metrics[
+                "intervention_rate"
+            ]
+        ),
+        "intervention_cost": float(
+            business_metrics[
+                "total_intervention_cost"
+            ]
+        ),
+        "intervened_churners": float(
+            business_metrics[
+                "actual_intervened_churners"
+            ]
+        ),
+    }
+
 def calculate_model_metrics(
     model,
     X_val,
@@ -87,7 +206,14 @@ def calculate_model_metrics(
         probabilities >= threshold
     ).astype(int)
 
-    return {
+    business_metrics = (
+        calculate_model_business_metrics(
+            probabilities=probabilities,
+            y_true=y_val,
+        )
+    )
+
+    classification_metrics = {
         "f1": float(
             f1_score(
                 y_val,
@@ -116,6 +242,12 @@ def calculate_model_metrics(
         ),
     }
 
+    return {
+        **classification_metrics,
+        **business_metrics,
+    }
+
+
 def get_promotion_thresholds() -> (
     PromotionThresholds
 ):
@@ -125,10 +257,16 @@ def get_promotion_thresholds() -> (
     )
 
     return PromotionThresholds(
-        minimum_f1_improvement=float(
+        minimum_realized_profit_improvement=float(
             cfg.get(
-                "minimum_f1_improvement",
-                0.005,
+                "minimum_realized_profit_improvement",
+                10.0,
+            )
+        ),
+        maximum_f1_degradation=float(
+            cfg.get(
+                "maximum_f1_degradation",
+                0.02,
             )
         ),
         maximum_recall_degradation=float(
@@ -147,6 +285,42 @@ def get_promotion_thresholds() -> (
             cfg.get(
                 "maximum_brier_score_increase",
                 0.01,
+            )
+        ),
+    )
+
+def get_business_evaluation_config() -> (
+    DecisionConfig
+):
+    """
+    Build the policy used for model-promotion evaluation.
+
+    Promotion uses a relative discount limit so results scale with the
+    validation-set size. The serving API retains its operational batch budget.
+    """
+    decision_config = (
+        DecisionConfig.from_config(
+            CFG
+        )
+    )
+
+    business_cfg = (
+        TRAIN_CFG.get(
+            "promotion",
+            {},
+        ).get(
+            "business_evaluation",
+            {},
+        )
+    )
+
+    return replace(
+        decision_config,
+        max_discount_budget=0.0,
+        max_discount_rate=float(
+            business_cfg.get(
+                "max_discount_rate",
+                0.20,
             )
         ),
     )
@@ -357,6 +531,34 @@ def compare_models(
         "promotion_reasons": list(
             decision.reasons
         ),
+        "promotion_evidence": (
+            decision.evidence   
+        ),
+        "challenger_expected_profit": (
+            challenger_metrics[
+                "expected_profit"
+            ]
+        ),
+        "challenger_realized_profit": (
+            challenger_metrics[
+                "realized_profit"
+            ]
+        ),
+        "challenger_profit_per_action": (
+            challenger_metrics[
+                "realized_profit_per_action"
+            ]
+        ),
+        "challenger_intervention_rate": (
+            challenger_metrics[
+                "intervention_rate"
+            ]
+        ),
+        "challenger_intervention_cost": (
+            challenger_metrics[
+                "intervention_cost"
+            ]
+        ),
     }
 
     if champion_metrics is not None:
@@ -382,6 +584,31 @@ def compare_models(
                 ),
                 "champion_decision_threshold": (
                     champion_threshold
+                ),
+                "champion_expected_profit": (
+                    champion_metrics[
+                        "expected_profit"
+                    ]
+                ),
+                "champion_realized_profit": (
+                    champion_metrics[
+                        "realized_profit"
+                    ]
+                ),
+                "champion_profit_per_action": (
+                    champion_metrics[
+                        "realized_profit_per_action"
+                    ]
+                ),
+                "champion_intervention_rate": (
+                    champion_metrics[
+                        "intervention_rate"
+                    ]
+                ),
+                "champion_intervention_cost": (
+                    champion_metrics[
+                        "intervention_cost"
+                    ]
                 ),
             }
         )

@@ -9,8 +9,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class PromotionThresholds:
-    minimum_f1_improvement: float
+    minimum_realized_profit_improvement: float
 
+    maximum_f1_degradation: float
     maximum_recall_degradation: float
     maximum_roc_auc_degradation: float
     maximum_brier_score_increase: float
@@ -51,6 +52,7 @@ def evaluate_promotion_policy(
         "recall",
         "roc_auc",
         "brier_score",
+        "realized_profit",
     }
 
     missing_challenger_metrics = (
@@ -97,9 +99,18 @@ def evaluate_promotion_policy(
             f"{sorted(missing_champion_metrics)}."
         )
 
-    f1_improvement = (
-        challenger_metrics["f1"]
-        - champion_metrics["f1"]
+    realized_profit_improvement = (
+        challenger_metrics[
+            "realized_profit"
+        ]
+        - champion_metrics[
+            "realized_profit"
+        ]
+    )
+
+    f1_degradation = (
+        champion_metrics["f1"]
+        - challenger_metrics["f1"]
     )
 
     recall_degradation = (
@@ -118,9 +129,15 @@ def evaluate_promotion_policy(
     )
 
     gates = {
-        "f1_improvement": (
-            f1_improvement
-            >= thresholds.minimum_f1_improvement
+        "business_value_improvement": (
+            realized_profit_improvement
+            >= thresholds
+            .minimum_realized_profit_improvement
+        ),
+        "f1_non_regression": (
+            f1_degradation
+            <= thresholds
+            .maximum_f1_degradation
         ),
         "recall_non_regression": (
             recall_degradation
@@ -173,8 +190,11 @@ def evaluate_promotion_policy(
                 thresholds
             ),
             "deltas": {
-                "f1_improvement": (
-                    f1_improvement
+                "realized_profit_improvement": (
+                    realized_profit_improvement
+                ),
+                "f1_degradation": (
+                    f1_degradation
                 ),
                 "recall_degradation": (
                     recall_degradation
