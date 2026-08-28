@@ -18,18 +18,58 @@ VALIDATED_PATH = get_path("validated_data")
 
 def get_feature_columns_from_training_config() -> tuple[list[str], list[str]]:
     """
-    Load numeric and categorical feature columns from training.yaml.
+    Load drift-monitoring columns from the training configuration.
 
-    This keeps feature drift monitoring aligned with the training pipeline.
+    Derived features can be excluded when their underlying raw features are
+    already monitored or when they are not persisted in prediction logs.
     """
-    training_cfg = load_config("training.yaml")
-    feature_cfg = training_cfg.get("features", {})
+    training_cfg = load_config(
+        "training.yaml"
+    )
+    monitoring_cfg = load_config(
+        "monitoring.yaml"
+    )
 
-    numeric_features = feature_cfg.get("numeric_columns", [])
-    categorical_features = feature_cfg.get("categorical_columns", [])
+    feature_cfg = training_cfg.get(
+        "features",
+        {},
+    )
+    drift_cfg = monitoring_cfg.get(
+        "feature_drift",
+        {},
+    )
 
-    return numeric_features, categorical_features
+    excluded_features = set(
+        drift_cfg.get(
+            "excluded_features",
+            [],
+        )
+    )
 
+    numeric_features = [
+        feature
+        for feature in feature_cfg.get(
+            "numeric_columns",
+            [],
+        )
+        if feature
+        not in excluded_features
+    ]
+
+    categorical_features = [
+        feature
+        for feature in feature_cfg.get(
+            "categorical_columns",
+            [],
+        )
+        if feature
+        not in excluded_features
+    ]
+
+    return (
+        numeric_features,
+        categorical_features,
+    )
 
 def _history_path() -> str:
     """

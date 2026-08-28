@@ -2,10 +2,14 @@ feature_drift:
   enabled: true
   use_training_feature_config: true
 
+  excluded_features:
+    - is_new_customer
+    - tenure_group
+
   min_samples: 50
   p_value_threshold: 0.01
   stat_threshold: 0.10
-
+  
 data_quality:
   enabled: true
   persist_history: false
