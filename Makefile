@@ -17,7 +17,8 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
 	test lint clean clean-venv clean-data clean-all reset-demo \
-	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke
+	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke \
+	churn-retraining-comparison-plot
 
 # --- Main Entry Point ---
 
@@ -222,6 +223,13 @@ churn-retraining-comparison-smoke: ## Smoke-test both controlled comparison bran
 		uv run --no-sync python \
 		scripts/run_controlled_retraining_experiment.py \
 		--smoke-test
+
+churn-retraining-comparison-plot: ## Generate the controlled retraining comparison figure
+	docker compose exec -T api \
+		uv run --no-sync python \
+		scripts/plot_churn_retraining_comparison.py
+
+
 # --- Production Helpers ---
 PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))
 
