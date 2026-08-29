@@ -70,7 +70,27 @@ def run_demo(
     max_days: int,
     label_delay_days: int,
     start_at: datetime,
+    retraining_mode: str,
 ) -> None:
+    
+    if retraining_mode not in {
+        "enabled",
+        "disabled",
+    }:
+        raise ValueError(
+            "retraining_mode must be "
+            "'enabled' or 'disabled'."
+        )
+
+    logger.info(
+        "Starting churn lifecycle demo | "
+        "retraining_mode=%s | "
+        "max_days=%s | batch_size=%s",
+        retraining_mode,
+        max_days,
+        batch_size,
+    )
+
     for day in range(1, max_days + 1):
         evaluated_at = (
             start_at
@@ -120,7 +140,6 @@ def run_demo(
             logger.info(
                 "No released labels available yet. Skipping performance evaluation and retraining."
             )
-            day += 1
             continue
 
         run_command(
@@ -135,6 +154,18 @@ def run_demo(
             f"Evaluating churn performance for day {day}",
         )
 
+        if (
+            retraining_mode
+            == "disabled"
+        ):
+            logger.info(
+                "Static baseline mode: "
+                "automatic retraining skipped "
+                "for simulation day %s.",
+                day,
+            )
+            continue
+         
         run_command(
             [
                 "python",
@@ -162,11 +193,24 @@ if __name__ == "__main__":
         type=parse_start_at,
         default=datetime.now(timezone.utc),
     )
+    parser.add_argument(
+        "--retraining-mode",
+        choices=[
+            "enabled",
+            "disabled",
+        ],
+        default="enabled",
+    )
     args = parser.parse_args()
 
     run_demo(
         batch_size=args.batch_size,
         max_days=args.max_days,
-        label_delay_days=args.label_delay_days,
+        label_delay_days=(
+            args.label_delay_days
+        ),
         start_at=args.start_at,
+        retraining_mode=(
+            args.retraining_mode
+        ),
     )
