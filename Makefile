@@ -17,7 +17,7 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
 	test lint clean clean-venv clean-data clean-all reset-demo \
-	ui-dashboard
+	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke
 
 # --- Main Entry Point ---
 
@@ -202,6 +202,26 @@ demo-churn-lifecycle: wait-prefect ## Run local churn lifecycle demo
 		--max-days 5 \
 		--label-delay-days 1
 
+churn-retraining-comparison: ## Run controlled churn comparison with and without retraining
+	docker compose exec -T \
+		-e APP_ENV=dev \
+		-e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+		-e PREFECT_API_URL=http://prefect:4200/api \
+		-e PREFECT_API_KEY= \
+		api \
+		uv run --no-sync python \
+		scripts/run_controlled_retraining_experiment.py
+
+churn-retraining-comparison-smoke: ## Smoke-test both controlled comparison branches
+	docker compose exec -T \
+		-e APP_ENV=dev \
+		-e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+		-e PREFECT_API_URL=http://prefect:4200/api \
+		-e PREFECT_API_KEY= \
+		api \
+		uv run --no-sync python \
+		scripts/run_controlled_retraining_experiment.py \
+		--smoke-test
 # --- Production Helpers ---
 PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))
 
