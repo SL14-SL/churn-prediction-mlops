@@ -59,19 +59,29 @@ flowchart TD
 | Monitoring | `src/monitoring/` | Data quality, drift, delayed labels, costs and retraining signals |
 | Storage | `src/storage/` | Local and cloud filesystem operations |
 
+
 ## Training and Promotion Flow
 
 ```mermaid
 flowchart TD
     A["Prepare and snapshot data"] --> B["Train candidate"]
-    B --> C["Evaluate candidate and Champion"]
-    C --> D{"Promotion gates pass?"}
+    B --> C["Recent-production evaluation"]
+    C --> D{"Recent gates pass?"}
     D -->|No| E["Keep current Champion"]
-    D -->|Yes| F["Register model version"]
-    F --> G["Assign Champion alias"]
-    G --> H["Publish serving release"]
-    H --> I["Reload and verify API"]
+    D -->|Yes| F["Reference safety evaluation"]
+    F --> G{"Safety gates pass?"}
+    G -->|No| E
+    G -->|Yes| H["Register and assign Champion"]
+    H --> I["Publish immutable release"]
+    I --> J["Reload and verify API"]
 ```
+Recent labeled production data is the primary promotion dataset when available.
+The policy optimizes recent business value while enforcing configurable
+non-regression tolerances for classification quality. Reference validation is a
+separate safety layer protecting the original data distribution.
+
+Retraining execution and Champion promotion are intentionally separate
+lifecycle events.
 
 `--force` bypasses the pre-training decision to skip a run. It does not bypass
 the Champion/challenger promotion policy. A fresh registry requires the

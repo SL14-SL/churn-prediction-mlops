@@ -136,6 +136,30 @@ make demo-churn-lifecycle
 The demo simulates prediction batches, delayed churn labels, performance
 updates and retraining decisions.
 
+## Controlled Retraining Experiments
+
+The controlled experiments compare a static branch with a retraining-enabled
+branch using identical ordered customer observations.
+
+Run the real-label customer-cohort shift:
+
+```bash
+make churn-cohort-shift-comparison
+make churn-cohort-shift-comparison-plot
+```
+Run the audited synthetic concept-drift experiment:
+
+```bash
+make churn-concept-drift-comparison
+make churn-concept-drift-comparison-plot
+```
+Generated manifests, archived monitoring tables, label-audit artifacts,
+comparison summaries and figures are stored under:
+`results/churn_retraining_comparison/`
+
+These experiments run against the local Docker Compose stack. They are
+portfolio demonstrations and do not modify the Google Cloud deployment.
+
 ## Serving Release Operations
 
 Inspect the active release through readiness:

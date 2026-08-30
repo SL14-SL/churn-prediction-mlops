@@ -144,21 +144,67 @@ Scheduled refresh permits candidate training but does not guarantee promotion.
 
 ## Promotion Remains Independent
 
-`train_candidate` only means there is enough evidence to spend resources on
-training. Promotion still requires:
+`train_candidate` only means that sufficient evidence exists to spend resources
+on candidate training. It does not imply that the resulting model will replace
+the Champion.
 
-- safe Champion loading;
-- fair evaluation on common validation data;
-- absolute classification-quality gates;
-- sufficient improvement over the Champion;
-- successful registration and alias assignment;
-- serving-release publication;
-- post-deployment readiness and prediction verification.
+When recent labeled production data is available, the Challenger is evaluated
+primarily on that recent production window. Promotion requires:
 
-If Champion evaluation cannot be completed safely, promotion is blocked.
+- a configurable realized-business-value improvement;
+- F1 non-regression within the configured tolerance;
+- recall non-regression within the configured tolerance;
+- ROC-AUC non-regression within the configured tolerance;
+- Brier-score non-regression within the configured tolerance.
 
-The decision threshold stored in the accepted release belongs to that model
-version. It must not be independently replaced during deployment.
+A separate reference-validation evaluation protects against excessive
+regression on the original data distribution. Its F1, recall, ROC-AUC and Brier
+score gates act as safety constraints rather than as the primary optimization
+objective.
+
+All promotion thresholds are configuration-driven. A candidate may therefore
+improve recent production performance and business value while still being
+rejected by a reference safety gate.
+
+After the gates pass, the lifecycle performs:
+
+1. model registration and Champion alias assignment;
+2. immutable serving-release publication;
+3. API reload;
+4. readiness and semantic prediction verification.
+
+If evaluation or deployment cannot be completed safely, promotion is blocked
+or the previous serving release is restored.
+
+The decision threshold stored in the accepted release belongs to that exact
+model version. It must not be independently replaced during deployment.
+
+## Controlled Policy Experiments
+
+Two local controlled experiments demonstrate the distinction between
+retraining and promotion:
+
+- the customer-cohort shift uses unchanged real features and labels while
+  changing the customer composition; training can occur without promotion;
+- the controlled concept-drift experiment applies an explicitly documented and
+  audited target-label shift to a defined cohort and demonstrates successful
+  adaptive promotion.
+
+Both branches of an experiment use the same ordered customer sequence and
+effective labels. Stored hashes and audit artifacts verify that differences
+between branches come from the retraining policy rather than different input
+data.
+
+```bash
+make churn-cohort-shift-comparison
+make churn-cohort-shift-comparison-plot
+
+make churn-concept-drift-comparison
+make churn-concept-drift-comparison-plot
+```
+Artifacts are written below:
+`results/churn_retraining_comparison/`
+
 
 ## Running the Policy
 

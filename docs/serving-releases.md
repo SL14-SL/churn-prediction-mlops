@@ -27,7 +27,7 @@ The manifest records:
 - decision threshold;
 - dataset version;
 - configuration hash;
-- Git commit;
+- Git commit when available from the runtime environment or repository;
 - artifact paths and SHA-256 checksums.
 
 The model itself remains an MLflow artifact. The release references the exact

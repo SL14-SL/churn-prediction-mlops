@@ -190,6 +190,9 @@ make train-force-prod
 ```
 
 Forced training still respects Champion/challenger promotion gates.
+When recent labeled production evidence is available, promotion uses that data
+as its primary evaluation dataset and applies reference-validation gates as a
+separate safety layer.
 
 ## Verify Production
 

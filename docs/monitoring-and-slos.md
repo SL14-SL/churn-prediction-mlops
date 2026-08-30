@@ -117,7 +117,7 @@ The provisioned dashboard presents:
 need matching counters and enough observations in the selected lookback window.
 
 <p align="center">
-  <img src="images/grafana_dashboard.png" width="100%" alt="Churn API SLO dashboard">
+  <img src="images/grafana_dashboard_slo.png" width="100%" alt="Grafana dashboard showing API availability, latency, error rate and serving readiness">
 </p>
 
 ## ML Quality Monitoring
@@ -152,16 +152,40 @@ classification metrics such as:
 An undefined metric caused by a one-class window is recorded as insufficient
 evidence rather than silently treated as model degradation.
 
+The lifecycle dashboard reports rolling classification performance over the
+latest 150 released labels. Retraining executions and successful Champion
+promotions are displayed as separate event types because a completed training
+run does not necessarily replace the active model.
+
 ### Business monitoring
 
-The Streamlit dashboard adds:
+The Streamlit dashboard separates current inference activity from outcomes
+that require released labels.
 
-- churn-risk distribution;
-- action distribution;
-- customer value;
-- expected retention value;
-- campaign budget use;
-- retraining and promotion events.
+Prediction and action monitoring covers:
+
+- prediction volume and average churn risk;
+- share of predictions above the active decision threshold;
+- active decision threshold;
+- retention-action volume and distribution.
+
+Labeled business outcomes cover:
+
+- expected net profit;
+- gross saved value;
+- intervention costs;
+- realized net profit;
+- expected and realized profit per labeled action.
+
+The relationship between the realized business metrics is:
+
+```text
+gross saved value - intervention costs = realized net profit
+```
+
+The policy-analysis view additionally shows how increasing the minimum expected
+profit required per action changes the selected action volume and simulated
+portfolio profit.
 
 ## Dashboard Roles
 
