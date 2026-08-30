@@ -189,7 +189,9 @@ Training and retraining are orchestrated with Prefect. The flow covers:
 
 The first Champion is created explicitly with a bootstrap run. Later forced or monitoring-triggered runs follow the normal promotion policy.
 
-A Challenger is promoted only if it satisfies the configured absolute quality gates and improves sufficiently over the current Champion. This avoids replacing a stable production model with a merely newer model.
+A Challenger is evaluated primarily on recent labeled production data. Promotion requires a configurable business-value improvement while F1, recall, ROC AUC and Brier score remain within their permitted regression limits. A separate reference-validation evaluation acts as a safety guard against excessive degradation on the original data distribution.
+
+Retraining and promotion are intentionally separate decisions: monitoring may trigger and execute a training run without replacing the active Champion.
 
 <p align="center">
   <img src="docs/images/prefect_flow.png" width="100%" alt="Prefect training flow">
@@ -212,12 +214,18 @@ MLflow tracks parameters, metrics, artifacts and model lineage. Classification m
 
 Dataset versions, configuration hashes and Git commits connect each registered model and serving release to the code and data used to create it.
 
+The screenshots below show the reproducible local development lifecycle. The
+environment-specific `-dev` registry contains multiple retraining candidates,
+with separate Champion and Challenger aliases. Production training uses the
+same tracking, registration and promotion workflow with production-specific
+storage and service configuration.
+
 <p align="center">
-  <img src="docs/images/mlflow_run_overview.png" width="100%" alt="MLflow run overview">
+  <img src="docs/images/mlflow_run_overview.png" width="100%" alt="Local MLflow training run with classification metrics and lineage">
 </p>
 
 <p align="center">
-  <img src="docs/images/mlflow_model_details.png" width="90%" alt="MLflow model details">
+  <img src="docs/images/mlflow_registered_model.png" width="100%" alt="Local MLflow registry showing multiple model versions and Champion and Challenger aliases">
 </p>
 
 ---
@@ -235,13 +243,48 @@ The monitoring layer combines ML, business and service-level signals.
 - Champion degradation detection
 - retraining eligibility and cooldown state
 
-### Business monitoring
+The Streamlit lifecycle dashboard combines current inference activity with
+label-dependent model and business outcomes. Prediction volume, active decision
+thresholds and retention actions cover all logged predictions, while
+classification performance and realized business metrics are calculated only
+after delayed labels become available.
+
+Retraining executions and successful Champion promotions are shown as separate
+events. This makes it possible to distinguish model training from the governed
+decision to replace the active production model.
+
+The dashboard screenshot was captured from the local controlled lifecycle
+experiment. The same monitoring code supports filesystem-backed local runs and
+GCS-backed production data through the project's storage abstraction.
+
+<p align="center">
+  <img src="docs/images/streamlit_dashboard_overview.png" width="100%" alt="Streamlit dashboard showing prediction activity, labeled business outcomes, model performance and retraining lifecycle events">
+</p>
+
+### Business monitoring and policy analysis
+
+Business monitoring covers:
 
 - churn-risk distribution
-- selected retention actions
-- customer value
-- expected campaign value
-- campaign cost and budget use
+- retention-action distribution
+- expected and realized net profit
+- gross saved value and intervention costs
+- expected and realized profit per labeled action
+- sensitivity of action selection to minimum-profit requirements
+
+The business-policy view separates model predictions from the downstream
+decision policy. It shows how predicted churn probabilities translate into
+retention actions and how increasing the minimum required profit per action
+changes both the selected action volume and the simulated portfolio profit.
+
+<p align="center">
+  <img src="docs/images/streamlit_dashboard_business.png" width="100%" alt="Streamlit business-policy dashboard showing churn probabilities, retention actions and minimum-profit threshold sensitivity">
+</p>
+
+> Business outcomes are simulated using configured customer values,
+> intervention costs and uplift assumptions. They demonstrate policy
+> evaluation and monitoring mechanics rather than observed causal effects from
+> a real retention campaign.
 
 ### API and SLO monitoring
 
@@ -251,18 +294,14 @@ The monitoring layer combines ML, business and service-level signals.
 - HTTP 5xx rate
 - service availability
 
-Prometheus evaluates alert rules for API availability, serving-bundle readiness, prediction latency and server-error rate. Alertmanager forwards notifications to the internal receiver, which can optionally deliver them to Slack.
+Prometheus evaluates alert rules for API availability, serving-bundle
+readiness, prediction latency and server-error rate. Alertmanager forwards
+notifications to the internal receiver, which can optionally deliver them to
+Slack. Grafana provides the operational SLO view independently from the
+model- and business-monitoring dashboard.
 
 <p align="center">
-  <img src="docs/images/grafana_dashboard.png" width="100%" alt="Grafana SLO dashboard">
-</p>
-
-<p align="center">
-  <img src="docs/images/streamlit_dashboard_overview.png" width="100%" alt="Streamlit monitoring overview">
-</p>
-
-<p align="center">
-  <img src="docs/images/streamlit_dashboard_business.png" width="100%" alt="Streamlit business dashboard">
+  <img src="docs/images/grafana_dashboard_slo.png" width="100%" alt="Grafana dashboard showing API availability, latency, error rate and serving readiness">
 </p>
 
 ---
@@ -281,13 +320,90 @@ Predictions are available immediately, while actual churn outcomes may only arri
 Retraining safeguards include:
 
 - minimum labeled sample count
-- evaluation over recent windows
+- evaluation over recent production windows
 - persistent degradation signals
 - cooldown after retraining
 - drift-aware execution
-- Champion/challenger promotion gates
+- idempotent retraining decisions
+- business-value-based Champion/challenger evaluation
+- classification non-regression gates
+- separate reference-validation safety gates
+- atomic serving-release publication after promotion
 
-Typical policy thresholds include minimum F1, recall and ROC AUC as well as a maximum Brier score. The exact values are configuration-driven.
+Retraining execution does not imply deployment. A candidate becomes the new
+Champion only after passing the recent-production promotion policy and the
+reference-validation safety gates. All thresholds are configuration-driven.
+
+
+---
+
+## 🧪 Controlled Retraining Experiments
+
+The retraining workflow is evaluated through two reproducible experiments.
+Both branches process the same ordered customer observations and delayed
+labels. The only experimental difference is whether automatic retraining is
+enabled.
+
+Performance is shown as rolling F1 over the latest 150 released labels.
+Business impact is reported as cumulative simulated profit uplift of the
+adaptive branch relative to the static branch.
+
+The controlled experiments run against the local Docker Compose stack so that
+both branches can be reset, replayed and compared deterministically without
+incurring cloud infrastructure costs. Cloud deployment and production
+verification are validated separately through Terraform and the CI/CD
+workflow.
+
+### Controlled concept drift: adaptation after promotion
+
+This experiment keeps the real Telco customer features unchanged and applies
+a controlled synthetic target shift to a documented customer cohort. Every
+modified label is recorded in a separate audit artifact, and both experiment
+branches use the same customer sequence and effective labels.
+
+Across the 28-day simulation:
+
+- 83 target labels were changed by the controlled drift process
+- 4 retraining runs were executed
+- 2 candidates passed the promotion policy
+- post-shift mean rolling F1 increased from `0.564` to `0.579`
+- final simulated realized profit increased from `€32,132` to `€32,216`
+- the adaptive branch produced a cumulative simulated profit uplift of `€84`
+
+<p align="center">
+  <img src="docs/images/churn_concept_drift_comparison.png" width="100%" alt="Controlled concept drift comparison with and without adaptive retraining">
+</p>
+
+The result illustrates that retraining does not need to outperform the static
+model in every individual evaluation window. Its benefit is evaluated across
+recent production evidence, business value and reference-distribution safety
+constraints.
+
+### Customer-cohort shift: retraining without promotion
+
+The complementary cohort-shift experiment changes only the composition of
+incoming customers. It uses real Telco customer features and labels without
+synthetic feature or target values.
+
+Monitoring executed two retraining runs, but neither candidate passed the
+promotion policy. The active Champion therefore remained unchanged, and the
+static and retraining-enabled branches produced identical model performance
+and business results.
+
+<p align="center">
+  <img src="docs/images/churn_cohort_shift_comparison.png" width="100%" alt="Controlled customer-cohort shift retraining policy evaluation">
+</p>
+
+Together, the experiments demonstrate both outcomes required from a guarded
+retraining system: adaptation when a candidate provides sufficient evidence
+of improvement, and rejection when a newer model does not justify replacing
+the production Champion.
+
+> Business value is simulated using the configured retention costs, customer
+> value and intervention-uplift assumptions. The concept-drift experiment
+> modifies target labels only within an explicitly defined and audited cohort;
+> it does not claim observed causal retention effects.
+
 
 ---
 
@@ -464,6 +580,17 @@ make demo-churn-lifecycle
 
 The demo simulates prediction batches, delayed labels, monitoring refreshes and retraining decisions.
 
+Controlled retraining experiments can be reproduced separately:
+
+```bash
+make churn-cohort-shift-comparison
+make churn-cohort-shift-comparison-plot
+
+make churn-concept-drift-comparison
+make churn-concept-drift-comparison-plot
+```
+Experiment artifacts, manifests, audit tables and comparison summaries are
+written below `results/churn_retraining_comparison/`.
 ---
 
 ## ☁️ Production Bootstrap and Verification
