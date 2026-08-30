@@ -18,7 +18,8 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
 	test lint clean clean-venv clean-data clean-all reset-demo \
 	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke \
-	churn-retraining-comparison-plot
+	churn-retraining-comparison-plot churn-concept-drift-comparison \
+	churn-concept-drift-comparison-smoke
 
 # --- Main Entry Point ---
 
@@ -222,6 +223,19 @@ churn-retraining-comparison-smoke: ## Smoke-test both controlled comparison bran
 		api \
 		uv run --no-sync python \
 		scripts/run_controlled_retraining_experiment.py \
+		--smoke-test
+
+churn-concept-drift-comparison: ## Run controlled concept-drift comparison
+	docker compose exec -T api \
+		uv run --no-sync python \
+		scripts/run_controlled_retraining_experiment.py \
+		--scenario concept_drift
+
+churn-concept-drift-comparison-smoke: ## Smoke-test controlled concept drift
+	docker compose exec -T api \
+		uv run --no-sync python \
+		scripts/run_controlled_retraining_experiment.py \
+		--scenario concept_drift \
 		--smoke-test
 
 churn-retraining-comparison-plot: ## Generate the controlled retraining comparison figure

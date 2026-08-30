@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import (
-    datetime,
-)
+from datetime import datetime
 from pathlib import Path
 
 from mlflow.tracking import MlflowClient
@@ -13,8 +11,19 @@ from scripts.archive_churn_demo_results import (
     archive_results,
 )
 from scripts.prepare_churn_cohort_shift import (
-    MANIFEST_FILE,
-    prepare_scenario,
+    MANIFEST_FILE as COHORT_MANIFEST_FILE,
+)
+from scripts.prepare_churn_cohort_shift import (
+    prepare_scenario as prepare_cohort_shift,
+)
+from scripts.prepare_churn_concept_drift import (
+    AUDIT_FILE as CONCEPT_AUDIT_FILE,
+)
+from scripts.prepare_churn_concept_drift import (
+    MANIFEST_FILE as CONCEPT_MANIFEST_FILE,
+)
+from scripts.prepare_churn_concept_drift import (
+    prepare_scenario as prepare_concept_drift,
 )
 from scripts.reset_churn_demo_run import (
     reset_churn_demo_run,
@@ -23,9 +32,29 @@ from scripts.run_churn_demo import (
     parse_start_at,
     run_demo,
 )
-from src.configs.loader import (
-    load_config,
-)
+from src.configs.loader import load_config
+
+
+SCENARIO_COHORT_SHIFT = "cohort_shift"
+SCENARIO_CONCEPT_DRIFT = "concept_drift"
+
+SCENARIO_NAMES = {
+    SCENARIO_COHORT_SHIFT: (
+        "controlled_real_cohort_shift"
+    ),
+    SCENARIO_CONCEPT_DRIFT: (
+        "controlled_synthetic_concept_drift"
+    ),
+}
+
+DEFAULT_EXPERIMENT_NAMES = {
+    SCENARIO_COHORT_SHIFT: (
+        "controlled_cohort_shift"
+    ),
+    SCENARIO_CONCEPT_DRIFT: (
+        "controlled_concept_drift"
+    ),
+}
 
 
 def load_champion_identity() -> dict:
@@ -50,32 +79,40 @@ def load_champion_identity() -> dict:
         "model_version": str(
             version.version
         ),
-        "model_run_id": (
-            version.run_id
-        ),
+        "model_run_id": version.run_id,
     }
 
 
-def load_scenario_manifest() -> dict:
-    manifest_path = Path(
-        MANIFEST_FILE
-    )
-
-    if not manifest_path.exists():
-        raise FileNotFoundError(
-            "Scenario manifest was not "
-            f"created: {manifest_path}"
+def get_scenario_files(
+    scenario_type: str,
+) -> tuple[str, str | None]:
+    if (
+        scenario_type
+        == SCENARIO_COHORT_SHIFT
+    ):
+        return (
+            COHORT_MANIFEST_FILE,
+            None,
         )
 
-    with manifest_path.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
-        return json.load(file)
+    if (
+        scenario_type
+        == SCENARIO_CONCEPT_DRIFT
+    ):
+        return (
+            CONCEPT_MANIFEST_FILE,
+            CONCEPT_AUDIT_FILE,
+        )
+
+    raise ValueError(
+        "Unsupported scenario type: "
+        f"{scenario_type}"
+    )
 
 
 def prepare_run(
     *,
+    scenario_type: str,
     max_days: int,
     batch_size: int,
     drift_start_day: int,
@@ -86,18 +123,46 @@ def prepare_run(
 ) -> dict:
     reset_churn_demo_run()
 
-    return prepare_scenario(
-        max_days=max_days,
-        batch_size=batch_size,
-        drift_start_day=(
-            drift_start_day
-        ),
-        ramp_days=ramp_days,
-        baseline_rate=baseline_rate,
-        post_drift_rate=(
-            post_drift_rate
-        ),
-        random_state=random_state,
+    if (
+        scenario_type
+        == SCENARIO_COHORT_SHIFT
+    ):
+        return prepare_cohort_shift(
+            max_days=max_days,
+            batch_size=batch_size,
+            drift_start_day=(
+                drift_start_day
+            ),
+            ramp_days=ramp_days,
+            baseline_rate=(
+                baseline_rate
+            ),
+            post_drift_rate=(
+                post_drift_rate
+            ),
+            random_state=random_state,
+        )
+
+    if (
+        scenario_type
+        == SCENARIO_CONCEPT_DRIFT
+    ):
+        return prepare_concept_drift(
+            max_days=max_days,
+            batch_size=batch_size,
+            drift_start_day=(
+                drift_start_day
+            ),
+            ramp_days=ramp_days,
+            post_drift_rate=(
+                post_drift_rate
+            ),
+            random_state=random_state,
+        )
+
+    raise ValueError(
+        "Unsupported scenario type: "
+        f"{scenario_type}"
     )
 
 
@@ -106,6 +171,7 @@ def run_branch(
     experiment_name: str,
     branch_name: str,
     retraining_mode: str,
+    scenario_type: str,
     max_days: int,
     batch_size: int,
     label_delay_days: int,
@@ -123,6 +189,13 @@ def run_branch(
         ),
     )
 
+    (
+        scenario_manifest_file,
+        scenario_audit_file,
+    ) = get_scenario_files(
+        scenario_type
+    )
+
     return archive_results(
         run_name=(
             f"{experiment_name}/"
@@ -132,23 +205,81 @@ def run_branch(
             retraining_mode
         ),
         scenario=(
-            "controlled_real_"
-            "cohort_shift"
+            SCENARIO_NAMES[
+                scenario_type
+            ]
         ),
         max_days=max_days,
         batch_size=batch_size,
         label_delay_days=(
             label_delay_days
         ),
-        start_at=(
-            start_at.isoformat()
+        start_at=start_at.isoformat(),
+        scenario_manifest_file=(
+            scenario_manifest_file
+        ),
+        scenario_audit_file=(
+            scenario_audit_file
         ),
     )
+
+
+def validate_branch_manifests(
+    static_manifest: dict,
+    adaptive_manifest: dict,
+) -> None:
+    customer_hash_key = (
+        "ordered_customer_id_sha256"
+    )
+
+    if (
+        static_manifest.get(
+            customer_hash_key
+        )
+        != adaptive_manifest.get(
+            customer_hash_key
+        )
+    ):
+        raise RuntimeError(
+            "Static and adaptive branches "
+            "received different customer "
+            "sequences."
+        )
+
+    label_hash_key = (
+        "selected_effective_label_sha256"
+    )
+
+    static_label_hash = (
+        static_manifest.get(
+            label_hash_key
+        )
+    )
+    adaptive_label_hash = (
+        adaptive_manifest.get(
+            label_hash_key
+        )
+    )
+
+    if (
+        static_label_hash is not None
+        or adaptive_label_hash is not None
+    ):
+        if (
+            static_label_hash
+            != adaptive_label_hash
+        ):
+            raise RuntimeError(
+                "Static and adaptive branches "
+                "received different effective "
+                "labels."
+            )
 
 
 def run_experiment(
     *,
     experiment_name: str,
+    scenario_type: str,
     max_days: int,
     batch_size: int,
     label_delay_days: int,
@@ -163,9 +294,7 @@ def run_experiment(
         load_champion_identity()
     )
 
-    print(
-        "Initial Champion:"
-    )
+    print("Initial Champion:")
     print(
         json.dumps(
             initial_champion,
@@ -175,6 +304,7 @@ def run_experiment(
     )
 
     static_manifest = prepare_run(
+        scenario_type=scenario_type,
         max_days=max_days,
         batch_size=batch_size,
         drift_start_day=(
@@ -189,13 +319,12 @@ def run_experiment(
     )
 
     static_output = run_branch(
-        experiment_name=(
-            experiment_name
-        ),
+        experiment_name=experiment_name,
         branch_name=(
             "without_retraining"
         ),
         retraining_mode="disabled",
+        scenario_type=scenario_type,
         max_days=max_days,
         batch_size=batch_size,
         label_delay_days=(
@@ -218,6 +347,7 @@ def run_experiment(
         )
 
     adaptive_manifest = prepare_run(
+        scenario_type=scenario_type,
         max_days=max_days,
         batch_size=batch_size,
         drift_start_day=(
@@ -231,19 +361,10 @@ def run_experiment(
         random_state=random_state,
     )
 
-    static_hash = static_manifest[
-        "ordered_customer_id_sha256"
-    ]
-    adaptive_hash = adaptive_manifest[
-        "ordered_customer_id_sha256"
-    ]
-
-    if static_hash != adaptive_hash:
-        raise RuntimeError(
-            "Static and adaptive branches "
-            "received different customer "
-            "sequences."
-        )
+    validate_branch_manifests(
+        static_manifest,
+        adaptive_manifest,
+    )
 
     champion_before_adaptive = (
         load_champion_identity()
@@ -259,11 +380,10 @@ def run_experiment(
         )
 
     adaptive_output = run_branch(
-        experiment_name=(
-            experiment_name
-        ),
+        experiment_name=experiment_name,
         branch_name="with_retraining",
         retraining_mode="enabled",
+        scenario_type=scenario_type,
         max_days=max_days,
         batch_size=batch_size,
         label_delay_days=(
@@ -276,12 +396,33 @@ def run_experiment(
         load_champion_identity()
     )
 
+    customer_hash = static_manifest[
+        "ordered_customer_id_sha256"
+    ]
+    effective_label_hash = (
+        static_manifest.get(
+            "selected_effective_"
+            "label_sha256"
+        )
+    )
+
     result = {
         "experiment_name": (
             experiment_name
         ),
-        "scenario_sha256": (
-            static_hash
+        "scenario_type": (
+            scenario_type
+        ),
+        "scenario": (
+            SCENARIO_NAMES[
+                scenario_type
+            ]
+        ),
+        "customer_sequence_sha256": (
+            customer_hash
+        ),
+        "effective_label_sha256": (
+            effective_label_hash
         ),
         "initial_champion": (
             initial_champion
@@ -299,6 +440,10 @@ def run_experiment(
         "batch_size": batch_size,
         "drift_start_day": (
             drift_start_day
+        ),
+        "ramp_days": ramp_days,
+        "post_drift_rate": (
+            post_drift_rate
         ),
         "retraining_changed_champion": (
             final_champion
@@ -346,10 +491,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--scenario",
+        choices=[
+            SCENARIO_COHORT_SHIFT,
+            SCENARIO_CONCEPT_DRIFT,
+        ],
+        default=SCENARIO_COHORT_SHIFT,
+    )
+    parser.add_argument(
         "--experiment-name",
-        default=(
-            "controlled_cohort_shift"
-        ),
+        default=None,
     )
     parser.add_argument(
         "--max-days",
@@ -391,7 +542,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post-drift-rate",
         type=float,
-        default=0.80,
+        default=None,
     )
     parser.add_argument(
         "--random-state",
@@ -409,22 +560,49 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    max_days = (
-        2
-        if args.smoke_test
-        else args.max_days
+    default_experiment_name = (
+        DEFAULT_EXPERIMENT_NAMES[
+            args.scenario
+        ]
+    )
+    experiment_name = (
+        args.experiment_name
+        or default_experiment_name
     )
 
-    experiment_name = (
-        f"{args.experiment_name}_smoke"
-        if args.smoke_test
-        else args.experiment_name
+    max_days = args.max_days
+    drift_start_day = (
+        args.drift_start_day
     )
+    ramp_days = args.ramp_days
+
+    if args.smoke_test:
+        max_days = 3
+        drift_start_day = 2
+        ramp_days = 1
+        experiment_name = (
+            f"{experiment_name}_smoke"
+        )
+
+    if args.post_drift_rate is None:
+        post_drift_rate = (
+            0.80
+            if (
+                args.scenario
+                == SCENARIO_COHORT_SHIFT
+            )
+            else 0.60
+        )
+    else:
+        post_drift_rate = (
+            args.post_drift_rate
+        )
 
     run_experiment(
         experiment_name=(
             experiment_name
         ),
+        scenario_type=args.scenario,
         max_days=max_days,
         batch_size=args.batch_size,
         label_delay_days=(
@@ -432,14 +610,14 @@ def main() -> None:
         ),
         start_at=args.start_at,
         drift_start_day=(
-            args.drift_start_day
+            drift_start_day
         ),
-        ramp_days=args.ramp_days,
+        ramp_days=ramp_days,
         baseline_rate=(
             args.baseline_rate
         ),
         post_drift_rate=(
-            args.post_drift_rate
+            post_drift_rate
         ),
         random_state=(
             args.random_state

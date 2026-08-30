@@ -6,9 +6,9 @@ from datetime import (
     datetime,
     timezone,
 )
-import fsspec
 from pathlib import Path
 
+import fsspec
 import pandas as pd
 
 from src.configs.loader import (
@@ -24,7 +24,7 @@ RAW_DATA_PATH = get_path(
     "raw_data"
 )
 
-SCENARIO_MANIFEST_FILE = (
+DEFAULT_SCENARIO_MANIFEST_FILE = (
     f"{RAW_DATA_PATH}/"
     "churn_cohort_shift_manifest.json"
 )
@@ -90,18 +90,22 @@ def copy_table(
 
     return len(dataframe)
 
-def load_scenario_manifest() -> dict:
+
+def load_scenario_manifest(
+    manifest_file: str,
+) -> dict:
     if not file_exists(
-        SCENARIO_MANIFEST_FILE
+        manifest_file
     ):
         return {}
 
     with fsspec.open(
-        SCENARIO_MANIFEST_FILE,
+        manifest_file,
         mode="r",
         encoding="utf-8",
     ) as file:
         return json.load(file)
+    
 
 def archive_results(
     *,
@@ -112,6 +116,10 @@ def archive_results(
     batch_size: int,
     label_delay_days: int,
     start_at: str,
+    scenario_manifest_file: str = (
+        DEFAULT_SCENARIO_MANIFEST_FILE
+    ),
+    scenario_audit_file: str | None = None,
 ) -> Path:
     output_directory = (
         RESULTS_ROOT
@@ -142,7 +150,9 @@ def archive_results(
         )
 
     scenario_manifest = (
-        load_scenario_manifest()
+        load_scenario_manifest(
+            scenario_manifest_file
+        )
     )
 
     if scenario_manifest:
@@ -161,6 +171,30 @@ def archive_results(
                 indent=2,
                 sort_keys=True,
             )
+
+    scenario_audit_rows = 0
+
+    if (
+        scenario_audit_file
+        and file_exists(
+            scenario_audit_file
+        )
+    ):
+        scenario_audit_rows = (
+            copy_table(
+                source=(
+                    scenario_audit_file
+                ),
+                destination=(
+                    output_directory
+                    / "scenario_audit.csv"
+                ),
+            )
+        )
+
+    archived_rows[
+        "scenario_audit"
+    ] = scenario_audit_rows
 
     metadata = {
         "run_name": run_name,
@@ -186,6 +220,12 @@ def archive_results(
         "scenario_sha256": (
             scenario_manifest.get(
                 "ordered_customer_id_sha256"
+            )
+        ),
+        "effective_label_sha256": (
+            scenario_manifest.get(
+                "selected_effective_"
+                "label_sha256"
             )
         ),
     }
@@ -259,6 +299,16 @@ def parse_args() -> argparse.Namespace:
         "--start-at",
         required=True,
     )
+    parser.add_argument(
+        "--scenario-manifest-file",
+        default=(
+            DEFAULT_SCENARIO_MANIFEST_FILE
+        ),
+    )
+    parser.add_argument(
+        "--scenario-audit-file",
+        default=None,
+    )
 
     return parser.parse_args()
 
@@ -278,6 +328,12 @@ def main() -> None:
             args.label_delay_days
         ),
         start_at=args.start_at,
+        scenario_manifest_file=(
+            args.scenario_manifest_file
+        ),
+        scenario_audit_file=(
+            args.scenario_audit_file
+        ),
     )
 
 
