@@ -18,8 +18,9 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
 	test lint clean clean-venv clean-data clean-all reset-demo \
 	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke \
-	churn-retraining-comparison-plot churn-concept-drift-comparison \
-	churn-concept-drift-comparison-smoke
+	churn-cohort-shift-comparison-plot churn-concept-drift-comparison \
+	churn-concept-drift-comparison-smoke churn-concept-drift-comparison-plot \
+	churn-retraining-comparison-plot
 
 # --- Main Entry Point ---
 
@@ -229,7 +230,8 @@ churn-concept-drift-comparison: ## Run controlled concept-drift comparison
 	docker compose exec -T api \
 		uv run --no-sync python \
 		scripts/run_controlled_retraining_experiment.py \
-		--scenario concept_drift
+		--scenario concept_drift \
+		--max-days 28
 
 churn-concept-drift-comparison-smoke: ## Smoke-test controlled concept drift
 	docker compose exec -T api \
@@ -238,11 +240,23 @@ churn-concept-drift-comparison-smoke: ## Smoke-test controlled concept drift
 		--scenario concept_drift \
 		--smoke-test
 
-churn-retraining-comparison-plot: ## Generate the controlled retraining comparison figure
+churn-cohort-shift-comparison-plot: ## Plot the controlled customer-cohort shift experiment
 	docker compose exec -T api \
 		uv run --no-sync python \
-		scripts/plot_churn_retraining_comparison.py
+		scripts/plot_churn_retraining_comparison.py \
+		--experiment-directory \
+		results/churn_retraining_comparison/controlled_cohort_shift
 
+churn-concept-drift-comparison-plot: ## Plot the controlled concept-drift experiment
+	docker compose exec -T api \
+		uv run --no-sync python \
+		scripts/plot_churn_retraining_comparison.py \
+		--experiment-directory \
+		results/churn_retraining_comparison/controlled_concept_drift
+
+churn-retraining-comparison-plot: \
+	churn-cohort-shift-comparison-plot \
+	churn-concept-drift-comparison-plot
 
 # --- Production Helpers ---
 PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))

@@ -8,8 +8,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.ticker import FuncFormatter, PercentFormatter
-
+from matplotlib.ticker import (
+    FuncFormatter,
+    PercentFormatter,
+)
 from sklearn.metrics import (
     f1_score,
     precision_score,
@@ -19,9 +21,17 @@ from sklearn.metrics import (
 
 STATIC_COLOR = "#F05A40"
 ADAPTIVE_COLOR = "#5865F2"
+SCENARIO_COLOR = "#8C6BB1"
 SHIFT_COLOR = "#F6C85F"
 RETRAIN_COLOR = "#00A67E"
 PROMOTION_COLOR = "#2CA02C"
+
+COHORT_SHIFT_SCENARIO = (
+    "controlled_real_cohort_shift"
+)
+CONCEPT_DRIFT_SCENARIO = (
+    "controlled_synthetic_concept_drift"
+)
 
 DEFAULT_EXPERIMENT_DIRECTORY = Path(
     "results/churn_retraining_comparison/"
@@ -32,7 +42,8 @@ DEFAULT_EXPERIMENT_DIRECTORY = Path(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Plot the controlled churn retraining comparison."
+            "Plot a controlled churn "
+            "retraining comparison."
         )
     )
     parser.add_argument(
@@ -45,10 +56,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
     )
+    parser.add_argument(
+        "--rolling-window-size",
+        type=int,
+        default=150,
+    )
     return parser.parse_args()
 
 
-def load_json(path: Path) -> dict:
+def load_json(
+    path: Path,
+) -> dict:
     with path.open(
         "r",
         encoding="utf-8",
@@ -68,7 +86,8 @@ def load_history(
 
     if not path.exists():
         raise FileNotFoundError(
-            f"Performance history not found: {path}"
+            "Performance history not "
+            f"found: {path}"
         )
 
     history = pd.read_parquet(path)
@@ -100,6 +119,7 @@ def load_history(
         .reset_index(drop=True)
     )
 
+
 def load_ground_truth(
     experiment_directory: Path,
     branch: str,
@@ -112,7 +132,8 @@ def load_ground_truth(
 
     if not path.exists():
         raise FileNotFoundError(
-            f"Ground truth not found: {path}"
+            "Ground truth not found: "
+            f"{path}"
         )
 
     ground_truth = pd.read_csv(path)
@@ -155,6 +176,18 @@ def load_ground_truth(
         errors="coerce",
     )
 
+    sort_columns = [
+        "released_simulation_day",
+    ]
+
+    if (
+        "prediction_timestamp"
+        in ground_truth.columns
+    ):
+        sort_columns.append(
+            "prediction_timestamp"
+        )
+
     return (
         ground_truth
         .dropna(
@@ -164,21 +197,23 @@ def load_ground_truth(
                 "released_simulation_day",
             ]
         )
-        .sort_values(
-            [
-                "released_simulation_day",
-                "prediction_timestamp",
-            ]
-        )
+        .sort_values(sort_columns)
         .reset_index(drop=True)
     )
+
 
 def build_rolling_history(
     history: pd.DataFrame,
     ground_truth: pd.DataFrame,
     *,
-    window_size: int = 150,
+    window_size: int,
 ) -> pd.DataFrame:
+    if window_size < 1:
+        raise ValueError(
+            "Rolling window size must "
+            "be positive."
+        )
+
     rolling_history = (
         history.copy()
     )
@@ -203,12 +238,28 @@ def build_rolling_history(
             )
         )
 
-        available_labels = ground_truth[
+        available_labels = (
             ground_truth[
-                "released_simulation_day"
+                ground_truth[
+                    "released_simulation_day"
+                ]
+                <= simulation_day
             ]
-            <= simulation_day
-        ].tail(window_size)
+            .tail(window_size)
+        )
+
+        if available_labels.empty:
+            rolling_f1_values.append(
+                float("nan")
+            )
+            rolling_precision_values.append(
+                float("nan")
+            )
+            rolling_recall_values.append(
+                float("nan")
+            )
+            rolling_sample_counts.append(0)
+            continue
 
         y_true = (
             available_labels["churn"]
@@ -274,12 +325,17 @@ def load_retraining_events(
 
     events = pd.read_parquet(path)
 
-    if "simulation_day" not in events.columns:
+    if (
+        "simulation_day"
+        not in events.columns
+    ):
         return pd.DataFrame()
 
     return (
         events
-        .dropna(subset=["simulation_day"])
+        .dropna(
+            subset=["simulation_day"]
+        )
         .sort_values("simulation_day")
         .reset_index(drop=True)
     )
@@ -296,54 +352,49 @@ def load_scenario(
 
     if not path.exists():
         raise FileNotFoundError(
-            f"Scenario manifest not found: {path}"
+            "Scenario manifest not "
+            f"found: {path}"
         )
 
     manifest = load_json(path)
+
+    if "daily_summary" not in manifest:
+        raise ValueError(
+            "Scenario manifest does not "
+            "contain daily_summary."
+        )
 
     daily_summary = pd.DataFrame(
         manifest["daily_summary"]
     )
 
-    if "simulation_day" not in daily_summary.columns:
-        if "day" in daily_summary.columns:
-            daily_summary = daily_summary.rename(
-                columns={
-                    "day": "simulation_day",
-                }
-            )
-        else:
-            daily_summary["simulation_day"] = range(
-                1,
-                len(daily_summary) + 1,
-            )
-
-    share_column = None
-
-    for candidate in [
-        "actual_high_risk_rate",
-        "target_high_risk_rate",
-        "actual_high_risk_share",
-        "high_risk_share",
-        "target_high_risk_share",
-    ]:
-        if candidate in daily_summary.columns:
-            share_column = candidate
-            break
-
-    if share_column is None:
+    if (
+        "simulation_day"
+        not in daily_summary.columns
+    ):
         raise ValueError(
-            "No high-risk share column found in "
-            f"{path}."
+            "Scenario daily summary does "
+            "not contain simulation_day."
         )
 
-    daily_summary = daily_summary.rename(
-        columns={
-            share_column: "high_risk_share",
-        }
-    )
-
     return daily_summary, manifest
+
+
+def get_promotion_count(
+    events: pd.DataFrame,
+) -> int:
+    if (
+        events.empty
+        or "champion_promoted"
+        not in events.columns
+    ):
+        return 0
+
+    return int(
+        events[
+            "champion_promoted"
+        ].fillna(False).sum()
+    )
 
 
 def value_at_day(
@@ -395,7 +446,7 @@ def add_experiment_markers(
         profit_value = value_at_day(
             adaptive_history,
             day=day,
-            column="business_realized_profit",
+            column="business_profit_delta",
         )
 
         axes[0].scatter(
@@ -447,27 +498,97 @@ def add_experiment_markers(
             )
 
 
+def histories_overlap(
+    static_history: pd.DataFrame,
+    adaptive_history: pd.DataFrame,
+) -> bool:
+    comparison = static_history[
+        [
+            "simulation_day",
+            "f1_score",
+            "business_realized_profit",
+        ]
+    ].merge(
+        adaptive_history[
+            [
+                "simulation_day",
+                "f1_score",
+                "business_realized_profit",
+            ]
+        ],
+        on="simulation_day",
+        how="inner",
+        suffixes=(
+            "_static",
+            "_adaptive",
+        ),
+    )
+
+    if comparison.empty:
+        return False
+
+    f1_difference = (
+        comparison[
+            "f1_score_static"
+        ]
+        - comparison[
+            "f1_score_adaptive"
+        ]
+    ).abs()
+
+    profit_difference = (
+        comparison[
+            "business_realized_profit_static"
+        ]
+        - comparison[
+            "business_realized_profit_adaptive"
+        ]
+    ).abs()
+
+    return bool(
+        (
+            f1_difference.fillna(0)
+            <= 1e-12
+        ).all()
+        and (
+            profit_difference.fillna(0)
+            <= 1e-9
+        ).all()
+    )
+
+
 def build_summary(
     static_history: pd.DataFrame,
     adaptive_history: pd.DataFrame,
     events: pd.DataFrame,
+    manifest: dict,
     *,
     post_shift_start: int,
 ) -> str:
     static_post_shift = static_history[
-        static_history["simulation_day"]
+        static_history[
+            "simulation_day"
+        ]
         >= post_shift_start
     ]
-    adaptive_post_shift = adaptive_history[
-        adaptive_history["simulation_day"]
-        >= post_shift_start
-    ]
+    adaptive_post_shift = (
+        adaptive_history[
+            adaptive_history[
+                "simulation_day"
+            ]
+            >= post_shift_start
+        ]
+    )
 
     static_f1 = float(
-        static_post_shift["f1_score"].mean()
+        static_post_shift[
+            "f1_score"
+        ].mean()
     )
     adaptive_f1 = float(
-        adaptive_post_shift["f1_score"].mean()
+        adaptive_post_shift[
+            "f1_score"
+        ].mean()
     )
 
     static_profit = float(
@@ -483,37 +604,240 @@ def build_summary(
 
     retraining_count = len(events)
     promotion_count = (
-        int(
-            events[
-                "champion_promoted"
-            ].fillna(False).sum()
-        )
-        if "champion_promoted" in events.columns
-        else 0
+        get_promotion_count(events)
     )
 
-    return "\n".join(
-        [
-            (
-                f"Post-shift mean rolling F1: "
-                f"{static_f1:.3f} static | "
-                f"{adaptive_f1:.3f} adaptive"
-            ),
-            (
-                f"Final realized profit: "
-                f"€{static_profit:,.0f} static | "
-                f"€{adaptive_profit:,.0f} adaptive"
-            ),
-            (
-                f"Profit difference: "
-                f"€{adaptive_profit - static_profit:+,.0f}"
-            ),
-            (
-                f"Retraining events: "
-                f"{retraining_count} | "
-                f"promotions: {promotion_count}"
-            ),
+    summary_parts = [
+        (
+            "Post-shift mean rolling F1: "
+            f"{static_f1:.3f} static | "
+            f"{adaptive_f1:.3f} adaptive"
+        ),
+        (
+            "Final realized profit: "
+            f"€{static_profit:,.0f} static | "
+            f"€{adaptive_profit:,.0f} adaptive"
+        ),
+        (
+            "Profit difference: "
+            f"€{adaptive_profit - static_profit:+,.0f}"
+        ),
+        (
+            "Retraining events: "
+            f"{retraining_count} | "
+            f"promotions: {promotion_count}"
+        ),
+    ]
+
+    if (
+        manifest.get("scenario")
+        == CONCEPT_DRIFT_SCENARIO
+    ):
+        summary_parts.append(
+            "Synthetic label flips: "
+            f"{manifest.get('selected_labels_flipped', 0)}"
+        )
+
+    return "   |   ".join(
+        summary_parts
+    )
+
+
+def plot_scenario_panel(
+    axis: plt.Axes,
+    scenario: pd.DataFrame,
+    manifest: dict,
+) -> None:
+    scenario_name = manifest.get(
+        "scenario",
+        "",
+    )
+
+    if (
+        scenario_name
+        == CONCEPT_DRIFT_SCENARIO
+    ):
+        required_columns = {
+            "simulation_day",
+            "target_flip_rate",
+        }
+
+        missing_columns = (
+            required_columns
+            - set(scenario.columns)
+        )
+
+        if missing_columns:
+            raise ValueError(
+                "Concept-drift manifest is "
+                "missing columns: "
+                f"{sorted(missing_columns)}"
+            )
+
+        values = scenario[
+            "target_flip_rate"
         ]
+
+        axis.plot(
+            scenario["simulation_day"],
+            values,
+            color=SCENARIO_COLOR,
+            marker="o",
+            linewidth=2.5,
+        )
+        axis.fill_between(
+            scenario["simulation_day"],
+            values,
+            color=SCENARIO_COLOR,
+            alpha=0.15,
+        )
+        axis.set_ylabel(
+            "Target label-flip rate"
+        )
+    elif (
+        scenario_name
+        == COHORT_SHIFT_SCENARIO
+    ):
+        if (
+            "actual_high_risk_rate"
+            in scenario.columns
+        ):
+            value_column = (
+                "actual_high_risk_rate"
+            )
+        elif (
+            "target_high_risk_rate"
+            in scenario.columns
+        ):
+            value_column = (
+                "target_high_risk_rate"
+            )
+        else:
+            raise ValueError(
+                "Cohort-shift manifest does "
+                "not contain a high-risk rate."
+            )
+
+        values = scenario[
+            value_column
+        ]
+
+        axis.plot(
+            scenario["simulation_day"],
+            values,
+            color=SCENARIO_COLOR,
+            marker="o",
+            linewidth=2.5,
+        )
+        axis.fill_between(
+            scenario["simulation_day"],
+            values,
+            color=SCENARIO_COLOR,
+            alpha=0.15,
+        )
+        axis.set_ylabel(
+            "High-risk share"
+        )
+    else:
+        raise ValueError(
+            "Unsupported scenario: "
+            f"{scenario_name}"
+        )
+
+    axis.yaxis.set_major_formatter(
+        PercentFormatter(1.0)
+    )
+    axis.set_ylim(
+        0,
+        min(
+            1.0,
+            float(values.max()) + 0.12,
+        ),
+    )
+
+
+def get_presentation(
+    manifest: dict,
+    *,
+    promotion_count: int,
+) -> dict:
+    scenario_name = manifest.get(
+        "scenario",
+        "",
+    )
+
+    adaptive_label = (
+        "Adaptive retraining"
+        if promotion_count > 0
+        else (
+            "Retraining enabled "
+            "(no promotion)"
+        )
+    )
+
+    if (
+        scenario_name
+        == CONCEPT_DRIFT_SCENARIO
+    ):
+        return {
+            "title": (
+                "Controlled Concept Drift: "
+                "With vs Without Retraining"
+            ),
+            "subtitle": (
+                "Identical real Telco customer "
+                "features in both branches; "
+                "controlled synthetic target "
+                "drift is explicitly audited."
+            ),
+            "shift_label": (
+                "Concept-drift ramp"
+            ),
+            "adaptive_label": (
+                adaptive_label
+            ),
+            "footer": (
+                "Synthetic target changes are "
+                "restricted to the documented "
+                "drift cohort. Business profit "
+                "uses configured retention-cost "
+                "and uplift assumptions."
+            ),
+        }
+
+    if (
+        scenario_name
+        == COHORT_SHIFT_SCENARIO
+    ):
+        return {
+            "title": (
+                "Controlled Customer-Cohort "
+                "Shift: Retraining Policy "
+                "Evaluation"
+            ),
+            "subtitle": (
+                "Identical real Telco customer "
+                "observations and labels in both "
+                "branches; no synthetic feature "
+                "or target values."
+            ),
+            "shift_label": (
+                "Customer-cohort shift"
+            ),
+            "adaptive_label": (
+                adaptive_label
+            ),
+            "footer": (
+                "Business profit is simulated "
+                "using the configured retention "
+                "costs, customer value and uplift "
+                "assumptions."
+            ),
+        }
+
+    raise ValueError(
+        "Unsupported scenario: "
+        f"{scenario_name}"
     )
 
 
@@ -521,6 +845,7 @@ def build_comparison_figure(
     *,
     experiment_directory: Path,
     output_path: Path,
+    rolling_window_size: int = 150,
 ) -> Path:
     static_history = load_history(
         experiment_directory,
@@ -530,6 +855,7 @@ def build_comparison_figure(
         experiment_directory,
         "with_retraining",
     )
+
     static_ground_truth = (
         load_ground_truth(
             experiment_directory,
@@ -547,16 +873,48 @@ def build_comparison_figure(
         build_rolling_history(
             static_history,
             static_ground_truth,
-            window_size=150,
+            window_size=(
+                rolling_window_size
+            ),
         )
     )
     adaptive_history = (
         build_rolling_history(
             adaptive_history,
             adaptive_ground_truth,
-            window_size=150,
+            window_size=(
+                rolling_window_size
+            ),
         )
     )
+
+    static_profit_by_day = (
+        static_history.set_index(
+            "simulation_day"
+        )[
+            "business_realized_profit"
+        ]
+    )
+
+    adaptive_history[
+        "business_profit_delta"
+    ] = (
+        adaptive_history[
+            "business_realized_profit"
+        ]
+        - adaptive_history[
+            "simulation_day"
+        ].map(static_profit_by_day)
+    )
+
+    if adaptive_history[
+        "business_profit_delta"
+    ].isna().any():
+        raise ValueError(
+            "Static and adaptive histories "
+            "do not contain matching simulation days."
+        )
+
     events = load_retraining_events(
         experiment_directory
     )
@@ -581,8 +939,18 @@ def build_comparison_figure(
         + ramp_days
         - 1
     )
-    
     post_shift_start = shift_end
+
+    promotion_count = (
+        get_promotion_count(events)
+    )
+    presentation = get_presentation(
+        manifest,
+        promotion_count=promotion_count,
+    )
+    adaptive_label = presentation[
+        "adaptive_label"
+    ]
 
     plt.style.use(
         "seaborn-v0_8-whitegrid"
@@ -602,41 +970,14 @@ def build_comparison_figure(
         },
     )
 
-    cohort_axis = axes[0]
+    scenario_axis = axes[0]
     f1_axis = axes[1]
     profit_axis = axes[2]
 
-    cohort_axis.plot(
-        scenario["simulation_day"],
-        scenario["high_risk_share"],
-        color="#8C6BB1",
-        marker="o",
-        linewidth=2.5,
-        label="High-risk customer share",
-    )
-    cohort_axis.fill_between(
-        scenario["simulation_day"],
-        scenario["high_risk_share"],
-        color="#8C6BB1",
-        alpha=0.15,
-    )
-    cohort_axis.set_ylabel(
-        "High-risk share"
-    )
-    cohort_axis.yaxis.set_major_formatter(
-        PercentFormatter(1.0)
-    )
-    cohort_axis.set_ylim(
-        0,
-        min(
-            1.0,
-            float(
-                scenario[
-                    "high_risk_share"
-                ].max()
-            )
-            + 0.12,
-        ),
+    plot_scenario_panel(
+        scenario_axis,
+        scenario,
+        manifest,
     )
 
     f1_axis.plot(
@@ -649,10 +990,7 @@ def build_comparison_figure(
         color=ADAPTIVE_COLOR,
         marker="o",
         linewidth=3.2,
-        label=(
-            "Retraining enabled "
-            "(no promotion)"
-        ),
+        label=adaptive_label,
         zorder=2,
     )
     f1_axis.plot(
@@ -670,7 +1008,8 @@ def build_comparison_figure(
         zorder=3,
     )
     f1_axis.set_ylabel(
-        "Rolling F1 score\n(last 150 labels)"
+        "Rolling F1 score\n"
+        f"(last {rolling_window_size} labels)"
     )
 
     all_f1_values = pd.concat(
@@ -679,50 +1018,76 @@ def build_comparison_figure(
             adaptive_history["f1_score"],
         ],
         ignore_index=True,
-    )
-    f1_axis.set_ylim(
-        max(
-            0.0,
-            float(all_f1_values.min()) - 0.05,
-        ),
-        min(
-            1.0,
-            float(all_f1_values.max()) + 0.05,
-        ),
+    ).dropna()
+
+    if not all_f1_values.empty:
+        f1_axis.set_ylim(
+            max(
+                0.0,
+                float(
+                    all_f1_values.min()
+                )
+                - 0.05,
+            ),
+            min(
+                1.0,
+                float(
+                    all_f1_values.max()
+                )
+                + 0.05,
+            ),
+        )
+
+    profit_days = adaptive_history[
+        "simulation_day"
+    ]
+
+    profit_delta = adaptive_history[
+        "business_profit_delta"
+    ]
+
+    profit_axis.axhline(
+        0,
+        color="#666666",
+        linewidth=1.2,
+        linestyle="--",
+        zorder=1,
     )
 
     profit_axis.plot(
-        adaptive_history[
-            "simulation_day"
-        ],
-        adaptive_history[
-            "business_realized_profit"
-        ],
+        profit_days,
+        profit_delta,
         color=ADAPTIVE_COLOR,
         marker="o",
-        linewidth=3.2,
-        label=(
-            "Retraining enabled "
-            "(no promotion)"
-        ),
-        zorder=2,
-    )
-    profit_axis.plot(
-        static_history[
-            "simulation_day"
-        ],
-        static_history[ 
-            "business_realized_profit"
-        ],
-        color=STATIC_COLOR,
-        linestyle="--",
-        marker="o",
-        linewidth=2.0,
-        label="Without retraining",
+        linewidth=3.0,
+        label="Cumulative profit uplift",
         zorder=3,
     )
+
+    profit_axis.fill_between(
+        profit_days,
+        0,
+        profit_delta,
+        where=(profit_delta >= 0),
+        color="#2CA02C",
+        alpha=0.16,
+        interpolate=True,
+        label="Adaptive ahead",
+    )
+
+    profit_axis.fill_between(
+        profit_days,
+        0,
+        profit_delta,
+        where=(profit_delta < 0),
+        color=STATIC_COLOR,
+        alpha=0.16,
+        interpolate=True,
+        label="Static ahead",
+    )
+
     profit_axis.set_ylabel(
-        "Cumulative simulated\nrealized profit"
+        "Cumulative simulated\nprofit uplift"
     )
     profit_axis.set_xlabel(
         "Simulation day"
@@ -803,12 +1168,14 @@ def build_comparison_figure(
             color=ADAPTIVE_COLOR,
             marker="o",
             linewidth=2.8,
-            label="Retraining enabled (no promotion)",
+            label=adaptive_label,
         ),
         Patch(
             facecolor=SHIFT_COLOR,
             alpha=0.3,
-            label="Customer-cohort shift",
+            label=presentation[
+                "shift_label"
+            ],
         ),
         Line2D(
             [0],
@@ -821,13 +1188,7 @@ def build_comparison_figure(
         ),
     ]
 
-    if (
-        "champion_promoted"
-        in events.columns
-        and events[
-            "champion_promoted"
-        ].fillna(False).any()
-    ):
+    if promotion_count > 0:
         legend_handles.append(
             Line2D(
                 [0],
@@ -858,43 +1219,56 @@ def build_comparison_figure(
         static_history,
         adaptive_history,
         events,
-        post_shift_start=post_shift_start,
+        manifest,
+        post_shift_start=(
+            post_shift_start
+        ),
     )
 
     figure.text(
         0.5,
         0.895,
-        summary.replace(
-            "\n",
-            "   |   ",
-        ),
+        summary,
         ha="center",
         va="center",
-        fontsize=9.5,
+        fontsize=9.2,
         color="#444444",
     )
-    figure.text(
-        0.5,
-        0.875,
-        (
-            "Static and retraining-enabled curves overlap "
-            "because both retraining candidates were rejected "
-            "by the promotion policy."
-        ),
-        ha="center",
-        va="center",
-        fontsize=9,
-        color="#666666",
-        style="italic",
-    )
 
+    overlap_note = None
 
+    if histories_overlap(
+        static_history,
+        adaptive_history,
+    ):
+        if promotion_count == 0:
+            overlap_note = (
+                "Static and retraining-enabled "
+                "curves overlap because no "
+                "candidate passed the promotion "
+                "policy."
+            )
+        else:
+            overlap_note = (
+                "The plotted curves overlap over "
+                "the observed period despite a "
+                "recorded promotion."
+            )
+
+    if overlap_note is not None:
+        figure.text(
+            0.5,
+            0.875,
+            overlap_note,
+            ha="center",
+            va="center",
+            fontsize=9,
+            color="#666666",
+            style="italic",
+        )
 
     figure.suptitle(
-        (
-            "Controlled Customer-Cohort Shift: "
-            "Retraining Policy Evaluation"
-        ),
+        presentation["title"],
         fontsize=21,
         fontweight="bold",
         y=0.99,
@@ -902,11 +1276,7 @@ def build_comparison_figure(
     figure.text(
         0.5,
         0.953,
-        (
-            "Identical real Telco customer observations "
-            "and labels in both branches; "
-            "no synthetic feature or target values."
-        ),
+        presentation["subtitle"],
         ha="center",
         fontsize=11,
         color="#555555",
@@ -914,14 +1284,16 @@ def build_comparison_figure(
     figure.text(
         0.5,
         0.012,
-        (
-            "Business profit is simulated using the "
-            "configured retention costs, customer value "
-            "and uplift assumptions."
-        ),
+        presentation["footer"],
         ha="center",
         fontsize=9,
         color="#666666",
+    )
+
+    top_limit = (
+        0.84
+        if overlap_note is not None
+        else 0.86
     )
 
     figure.tight_layout(
@@ -929,7 +1301,7 @@ def build_comparison_figure(
             0.04,
             0.04,
             0.98,
-            0.86,
+            top_limit,
         ]
     )
 
@@ -966,6 +1338,9 @@ def main() -> None:
                 args.experiment_directory
             ),
             output_path=output_path,
+            rolling_window_size=(
+                args.rolling_window_size
+            ),
         )
     )
 
