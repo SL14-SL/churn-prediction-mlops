@@ -65,6 +65,17 @@ promotion:
   maximum_roc_auc_degradation: 0.01
   maximum_brier_score_increase: 0.01
 
+  recent_evaluation:
+    enabled: true
+    window_size: 300
+    minimum_samples: 300
+
+  reference_safety:
+    maximum_f1_degradation: 0.02
+    maximum_recall_degradation: 0.02
+    maximum_roc_auc_degradation: 0.03
+    maximum_brier_score_increase: 0.01
+
   business_evaluation:
     max_discount_rate: 0.20
 
@@ -78,6 +89,10 @@ features:
     - encode_categoricals
     - drop_configured
     - cast_ohe_to_bool
+  
+  derived_columns:
+    - tenure_group
+    - is_new_customer
     
     
   # These columns need to be cast from String to Float (Notebook logic)
