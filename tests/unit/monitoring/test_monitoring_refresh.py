@@ -83,6 +83,56 @@ def test_builds_performance_history():
         "brier_score"
         in history.columns
     )
+    assert history["roc_auc"].isna().all()
+    assert history["pr_auc"].isna().all()
+
+    assert (
+        history["log_loss"]
+        .notna()
+        .all()
+    )
+
+    assert (
+        history["brier_score"]
+        .notna()
+        .all()
+    )
+
+def test_builds_ranking_metrics_for_two_class_batch():
+    cumulative = pd.concat(
+        [
+            labeled_batch(
+                batch_id="batch-1",
+                prediction_id="prediction-1",
+                probability=0.90,
+                churn="Yes",
+                available_at=(
+                    "2026-08-24T00:00:00Z"
+                ),
+            ),
+            labeled_batch(
+                batch_id="batch-1",
+                prediction_id="prediction-2",
+                probability=0.10,
+                churn="No",
+                available_at=(
+                    "2026-08-24T00:00:00Z"
+                ),
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    history = (
+        monitoring_refresh
+        .build_performance_history(
+            cumulative
+        )
+    )
+
+    assert len(history) == 1
+    assert history.iloc[0]["roc_auc"] == 1.0
+    assert history.iloc[0]["brier_score"] >= 0.0
 
 
 def test_duplicate_prediction_is_removed(

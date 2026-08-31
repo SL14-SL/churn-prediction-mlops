@@ -50,10 +50,40 @@ def append_retraining_event(
         with fsspec.open(path, "rb") as file:
             history = pd.read_parquet(file)
 
-        history = pd.concat(
-            [history, new_row],
-            ignore_index=True,
-        )
+        if history.empty:
+            history = new_row
+        else:
+            all_columns = list(
+                dict.fromkeys(
+                    [
+                        *history.columns,
+                        *new_row.columns,
+                    ]
+                )
+            )
+
+            history_for_concat = (
+                history.dropna(
+                    axis=1,
+                    how="all",
+                )
+            )
+            new_row_for_concat = (
+                new_row.dropna(
+                    axis=1,
+                    how="all",
+                )
+            )
+
+            history = pd.concat(
+                [
+                    history_for_concat,
+                    new_row_for_concat,
+                ],
+                ignore_index=True,
+            ).reindex(
+                columns=all_columns
+            )
     else:
         history = new_row
 

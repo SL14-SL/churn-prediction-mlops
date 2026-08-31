@@ -23,6 +23,7 @@ from src.monitoring.performance import (
 )
 
 
+
 @dataclass(frozen=True)
 class MonitoringRefreshResult:
     ground_truth_rows: int

@@ -152,43 +152,107 @@ def compute_classification_metrics(
     if clean_df.empty:
         raise ValueError("No rows available after dropping missing values.")
 
-    y_true = _normalize_binary_target(clean_df[y_true_col])
-    y_proba = clean_df[y_proba_col].astype(float).clip(0.0, 1.0)
-    y_pred = (y_proba >= threshold).astype(int)
+    y_true = _normalize_binary_target(
+        clean_df[y_true_col]
+    )
+    y_proba = (
+        clean_df[y_proba_col]
+        .astype(float)
+        .clip(0.0, 1.0)
+    )
+    y_pred = (
+        y_proba >= threshold
+    ).astype(int)
 
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    has_both_classes = (
+        y_true.nunique() == 2
+    )
+
+    tn, fp, fn, tp = confusion_matrix(
+        y_true,
+        y_pred,
+        labels=[0, 1],
+    ).ravel()
 
     metrics: dict[str, Any] = {
         "n_samples": int(len(clean_df)),
         "threshold": float(threshold),
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "roc_auc": _safe_metric(roc_auc_score, y_true, y_proba),
-        "pr_auc": _safe_metric(average_precision_score, y_true, y_proba),
-        "log_loss": _safe_metric(log_loss, y_true, y_proba),
-        "brier_score": _safe_metric(brier_score_loss, y_true, y_proba),
+        "accuracy": float(
+            accuracy_score(
+                y_true,
+                y_pred,
+            )
+        ),
+        "precision": float(
+            precision_score(
+                y_true,
+                y_pred,
+                zero_division=0,
+            )
+        ),
+        "recall": float(
+            recall_score(
+                y_true,
+                y_pred,
+                zero_division=0,
+            )
+        ),
+        "f1": float(
+            f1_score(
+                y_true,
+                y_pred,
+                zero_division=0,
+            )
+        ),
+        "roc_auc": (
+            float(
+                roc_auc_score(
+                    y_true,
+                    y_proba,
+                )
+            )
+            if has_both_classes
+            else None
+        ),
+        "pr_auc": (
+            float(
+                average_precision_score(
+                    y_true,
+                    y_proba,
+                )
+            )
+            if has_both_classes
+            else None
+        ),
+        "log_loss": float(
+            log_loss(
+                y_true,
+                y_proba,
+                labels=[0, 1],
+            )
+        ),
+        "brier_score": float(
+            brier_score_loss(
+                y_true,
+                y_proba,
+            )
+        ),
         "true_negatives": int(tn),
         "false_positives": int(fp),
         "false_negatives": int(fn),
         "true_positives": int(tp),
-        "predicted_churn_rate": float(y_pred.mean()),
-        "actual_churn_rate": float(y_true.mean()),
-        "avg_churn_probability": float(y_proba.mean()),
+        "predicted_churn_rate": float(
+            y_pred.mean()
+        ),
+        "actual_churn_rate": float(
+            y_true.mean()
+        ),
+        "avg_churn_probability": float(
+            y_proba.mean()
+        ),
     }
 
     return metrics
-
-
-def _safe_metric(metric_fn, y_true: pd.Series, y_score: pd.Series) -> float | None:
-    """
-    Compute a metric safely when a monitoring batch contains only one class.
-    """
-    try:
-        return float(metric_fn(y_true, y_score))
-    except ValueError:
-        return None
 
 
 # -------------------------------------------------
