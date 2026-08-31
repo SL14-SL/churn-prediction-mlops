@@ -17,7 +17,7 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
 	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
 	test lint clean clean-venv clean-data clean-all reset-demo \
-	ui-dashboard churn-retraining-comparison churn-retraining-comparison-smoke \
+	churn-retraining-comparison churn-retraining-comparison-smoke \
 	churn-cohort-shift-comparison-plot churn-concept-drift-comparison \
 	churn-concept-drift-comparison-smoke churn-concept-drift-comparison-plot \
 	churn-retraining-comparison-plot
@@ -58,7 +58,7 @@ dev-up: ## Start the complete local container stack
 	UID=$$(id -u) \
 	GID=$$(id -g) \
 	docker compose up -d --build
-	@echo "✅ Services are live: API (8000), MLflow (5000), Prefect (4200), Grafana (3000), Prometheus (9090)"
+	@echo "✅ Services are live: API (8000), Streamlit (8501), MLflow (5000), Prefect (4221), Grafana (3000), Prometheus (9090)"
 
 dev-down: ## Stop all containers and remove networks
 	@echo "🛑 Shutting down services..."
@@ -145,18 +145,6 @@ prefect-worker: wait-prefect prefect-pool ## Start Prefect worker for the local 
 	uv run --active prefect worker start --pool "$(PREFECT_POOL)"
 
 # --- UI Quicklinks ---
-
-ui-dashboard: ## Start the local Streamlit monitoring dashboard
-	docker compose exec \
-		-e HOME=/tmp \
-		-e STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
-		api \
-		uv run --no-sync streamlit run \
-			src/monitoring/dashboard.py \
-			--server.address 0.0.0.0 \
-			--server.port 8501 \
-			--browser.gatherUsageStats false
-			
 ui-prefect: ## Open local Prefect UI in the browser
 	@python3 -m webbrowser http://localhost:4200
 

@@ -528,6 +528,18 @@ make dev-up
 make wait-prefect
 ```
 
+| Service | URL |
+|---|---|
+| Forecasting API | http://localhost:8000 |
+| Swagger UI | http://localhost:8000/docs |
+| Streamlit | http://localhost:8501 |
+| MLflow | http://localhost:5000 |
+| Prefect | http://localhost:4221 |
+| Grafana | http://localhost:3000 |
+| Prometheus | http://localhost:9090 |
+| Alertmanager | http://localhost:9093 |
+
+
 ### 4. Bootstrap the first local Champion
 
 Use the bootstrap target only when the local MLflow registry is empty:

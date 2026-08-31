@@ -59,7 +59,6 @@ services:
     user: "${UID}:${GID}"
     ports:
       - "8000:8080"
-      - "8501:8501"
     environment:
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow:5000
@@ -89,6 +88,65 @@ services:
       prefect:
         condition: service_started
 
+  dashboard:
+    build: .
+    user: "${UID}:${GID}"
+    command:
+      - uv
+      - run
+      - --no-sync
+      - streamlit
+      - run
+      - src/monitoring/dashboard.py
+      - --server.address
+      - 0.0.0.0
+      - --server.port
+      - "8501"
+      - --server.headless
+      - "true"
+      - --browser.gatherUsageStats
+      - "false"
+    ports:
+      - "8501:8501"
+    environment:
+      PYTHONPATH: /app
+      HOME: /tmp
+      APP_ENV: dev
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      PREFECT_API_URL: http://prefect:4200/api
+      MPLCONFIGDIR: /tmp/matplotlib
+      UV_CACHE_DIR: /tmp/.uv_cache
+      PYTHONPYCACHEPREFIX: /tmp/pycache
+      UV_NO_SYNC: "1"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    volumes:
+      - ./src:/app/src
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./models:/app/models
+      - ./mlruns_artifacts:/app/mlruns_artifacts
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://localhost:8501/_stcore/health',
+          timeout=3
+          )
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mlops-net
+    depends_on:
+      api:
+        condition: service_started
+        
   prometheus:
     image: prom/prometheus:latest
     container_name: churn-prometheus
