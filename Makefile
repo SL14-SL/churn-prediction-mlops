@@ -10,13 +10,15 @@ LOCAL_PREFECT_API_URL := http://localhost:4200/api
 PREFECT_POOL ?= local-pool
 PREFECT_PROJECT_DIR ?= $(CURDIR)
 
-.PHONY: help setup all dev dev-up dev-down logs refresh-api \
+.PHONY: all help setup dev dev-up dev-down logs dashboard-logs refresh-api \
 	ui-prefect ui-mlflow prefect-status wait-prefect prefect-pool \
 	prefect-setup prefect-worker train train-force train-bootstrap \
 	auto-retrain predict-test demo-churn-lifecycle reset-local-stack \
+	rollback-serving \
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
-	train-bootstrap-prod train-force-prod verify-prod bootstrap-and-verify-prod \
-	test lint clean clean-venv clean-data clean-all reset-demo \
+	predict-test-prod train-bootstrap-prod train-force-prod verify-prod \
+	bootstrap-and-verify-prod compose-check check test lint clean clean-venv \
+	clean-data clean-all reset-demo \
 	churn-retraining-comparison churn-retraining-comparison-smoke \
 	churn-cohort-shift-comparison-plot churn-concept-drift-comparison \
 	churn-concept-drift-comparison-smoke churn-concept-drift-comparison-plot \
@@ -24,11 +26,11 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 
 # --- Main Entry Point ---
 
-all: setup dev-up wait-prefect prefect-pool prefect-setup train-bootstrap test ## Run the complete local bootstrap pipeline
+all: setup dev-up wait-prefect prefect-pool prefect-setup train-bootstrap check ## Bootstrap and validate the complete local environment
 	@echo "✨ Full build successful! API, MLflow and Prefect are running."
 
-help: ## Display this help screen
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-28s\033[0m %s\n", $$1, $$2}'
+help: ## Display available lifecycle commands
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-34s\033[0m %s\n", $$1, $$2}'
 
 # --- Environment Setup ---
 
@@ -58,7 +60,7 @@ dev-up: ## Start the complete local container stack
 	UID=$$(id -u) \
 	GID=$$(id -g) \
 	docker compose up -d --build
-	@echo "✅ Services are live: API (8000), Streamlit (8501), MLflow (5000), Prefect (4221), Grafana (3000), Prometheus (9090)"
+	@echo "✅ Services are live: API (8000), Streamlit (8501), MLflow (5000), Prefect (4200), Grafana (3000), Prometheus (9090), Alertmanager (9093)"
 
 dev-down: ## Stop all containers and remove networks
 	@echo "🛑 Shutting down services..."
@@ -69,6 +71,9 @@ dev: dev-up wait-prefect prefect-pool prefect-setup ## Start local stack and reg
 
 logs: ## Follow logs from the API service
 	docker compose logs -f api
+
+dashboard-logs: ## Follow logs from the Streamlit dashboard service
+	docker compose logs -f dashboard
 
 refresh-api: ## Restart or recreate the local API service
 	@echo "🔄 Refreshing API..."
@@ -244,7 +249,20 @@ churn-concept-drift-comparison-plot: ## Plot the controlled concept-drift experi
 
 churn-retraining-comparison-plot: \
 	churn-cohort-shift-comparison-plot \
-	churn-concept-drift-comparison-plot
+	churn-concept-drift-comparison-plot ## Plot both controlled retraining experiments
+
+# --- Local Serving Releases ---
+
+rollback-serving: ## Roll back local serving to RELEASE_ID
+	@test -n "$(RELEASE_ID)" || \
+		(echo "❌ RELEASE_ID is required. Run: make rollback-serving RELEASE_ID=<id>"; exit 1)
+	@echo "↩️ Rolling back serving release to $(RELEASE_ID)..."
+	@curl -fsS -X POST \
+		http://localhost:8000/admin/rollback-serving-release \
+		-H "Content-Type: application/json" \
+		-H "X-API-KEY: $(API_KEY)" \
+		-d '{"release_id":"$(RELEASE_ID)"}' \
+		| jq .
 
 # --- Production Helpers ---
 PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))
@@ -294,7 +312,7 @@ debug-prod-env: ## Show non-secret production values loaded by Make
 	@echo "PREFECT_API_KEY configured: $$(test -n "$(PREFECT_API_KEY)" && echo yes || echo no)"
 	@echo "API_KEY configured: $$(test -n "$(API_KEY)" && echo yes || echo no)"
 
-prepare-mlflow-prod-demo: check-prod-env ## Prepare one warm MLflow instance for the ephemeral demo
+prepare-mlflow-prod-demo: check-prod-env ## Prepare one warm MLflow instance for the ephemeral cloud demo
 	@echo "🔥 Preparing ephemeral MLflow production demo..."
 	@gcloud run services update \
 		mlflow-server \
@@ -386,6 +404,13 @@ bootstrap-and-verify-prod: train-bootstrap-prod verify-prod ## Bootstrap and ver
 	@echo "✅ Production bootstrap and semantic verification completed."
 
 # --- Quality Assurance ---
+
+compose-check: ## Validate the Docker Compose configuration
+	@echo "🐳 Validating Docker Compose configuration..."
+	docker compose config --quiet
+
+check: lint test compose-check ## Run all local quality checks
+	@echo "✅ All local quality checks passed."
 
 test: ## Run unit and integration tests
 	@echo "🧪 Running pytest suite..."
