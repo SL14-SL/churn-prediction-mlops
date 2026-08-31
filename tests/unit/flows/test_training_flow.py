@@ -11,6 +11,10 @@ os.environ["PREFECT_API_MODE"] = "ephemeral"
 os.environ.pop("PREFECT_API_URL", None)
 
 import flows.training_flow as training_flow
+from flows.tasks import (
+    registry_tasks,
+    serving_tasks
+)
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +40,24 @@ def mock_flow_runtime():
         ),
         patch(
             "flows.training_flow.get_run_logger",
+            return_value=mock_logger,
+        ),
+        patch(
+            "flows.tasks.registry_tasks."
+            "get_run_logger",
+            return_value=mock_logger,
+        ),
+        patch(
+            "flows.tasks.serving_tasks."
+            "get_run_logger",
+            return_value=mock_logger,
+        ),
+        patch(
+            "flows.tasks.data_tasks.get_run_logger",
+            return_value=mock_logger,
+        ),
+        patch(
+            "flows.tasks.training_tasks.get_run_logger",
             return_value=mock_logger,
         ),
     ):
@@ -579,22 +601,22 @@ def test_publish_serving_release_task(
         }[name]
 
     monkeypatch.setattr(
-        "flows.training_flow.get_path",
+        "flows.tasks.serving_tasks.get_path",
         fake_get_path,
     )
     monkeypatch.setattr(
-        "flows.training_flow."
+        "flows.tasks.serving_tasks."
         "build_prediction_probe",
         mock_build_probe,
     )
     monkeypatch.setattr(
-        "flows.training_flow."
+        "flows.tasks.serving_tasks."
         "publish_serving_release",
         mock_publish,
     )
 
     result = (
-        training_flow
+        serving_tasks
         .task_publish_serving_release
         .fn(
             registration_result=(
@@ -629,7 +651,7 @@ def test_publish_serving_release_task(
 
     assert call_kwargs[
         "model_name"
-    ] == training_flow.MODEL_NAME
+    ] == serving_tasks.MODEL_NAME
 
     assert call_kwargs[
         "model_version"
@@ -684,7 +706,7 @@ def test_publish_serving_release_rejects_non_promoted_model():
         match="non-promoted model",
     ):
         (
-            training_flow
+            serving_tasks
             .task_publish_serving_release
             .fn(
                 registration_result=(
@@ -948,20 +970,23 @@ def test_bootstrap_champion_registers_initial_model(
     )
 
     monkeypatch.setattr(
-        "flows.training_flow.champion_exists",
+        "flows.tasks.registry_tasks."
+        "champion_exists",
         mock_champion_exists,
     )
     monkeypatch.setattr(
-        "flows.training_flow.MlflowClient",
+        "flows.tasks.registry_tasks."
+        "MlflowClient",
         mock_client_factory,
     )
     monkeypatch.setattr(
-        "flows.training_flow.register_model",
+        "flows.tasks.registry_tasks."
+        "register_model",
         mock_register_model,
     )
 
     result = (
-        training_flow
+        registry_tasks
         .task_bootstrap_champion
         .fn(
             candidate_run_id=(

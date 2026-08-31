@@ -1,6 +1,8 @@
 import os
-
+import hashlib
+import json
 import requests
+
 from mlflow.tracking import (
     MlflowClient,
 )
@@ -23,8 +25,12 @@ from src.inference.releases.repository import (
     load_serving_release_manifest,
 )
 
+from src.deployment.prediction_probe import build_prediction_probe
+from src.inference.releases.publisher import publish_serving_release
+
 
 ENV_CFG = load_config()
+MODEL_NAME = ENV_CFG["model"]["registry_name"]
 
 
 def resolve_api_base_url() -> str:
@@ -347,3 +353,127 @@ def task_rollback_serving_release(
         ),
         "api_result": api_result,
     }
+
+
+def build_config_hash(
+    dataset_manifest: dict,
+) -> str | None:
+    """
+    Build a deterministic hash of the effective training configuration.
+    """
+    effective_config = (
+        dataset_manifest.get(
+            "effective_config"
+        )
+    )
+
+    if effective_config is None:
+        return None
+
+    serialized = json.dumps(
+        effective_config,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+    return hashlib.sha256(
+        serialized.encode("utf-8")
+    ).hexdigest()
+
+
+@task(name="Publish Serving Release")
+def task_publish_serving_release(
+    *,
+    registration_result: dict,
+    dataset_manifest: dict,
+):
+    """
+    Publish and activate the complete churn serving release.
+    """
+    
+    if not registration_result.get(
+        "promoted",
+        False,
+    ):
+        raise ValueError(
+            "Cannot publish a serving release "
+            "for a non-promoted model."
+        )
+    
+    p_logger = get_run_logger()
+    
+    models_path = get_path(
+        "models"
+    )
+    validated_path = get_path(
+        "validated_data"
+    )
+
+    feature_schema_source = (
+        f"{models_path}/feature_schema.json"
+    )
+    validated_data_path = (
+        f"{validated_path}/train.parquet"
+    )
+
+    prediction_probe = (
+        build_prediction_probe(
+            validated_data_path=(
+                validated_data_path
+            ),
+        )
+    )
+
+    manifest = publish_serving_release(
+        models_path=models_path,
+        model_name=MODEL_NAME,
+        model_version=(
+            registration_result[
+                "model_version"
+            ]
+        ),
+        model_run_id=(
+            registration_result[
+                "model_run_id"
+            ]
+        ),
+        model_type=(
+            registration_result[
+                "model_type"
+            ]
+        ),
+        decision_threshold=(
+            registration_result[
+                "decision_threshold"
+            ]
+        ),
+        dataset_version=(
+            dataset_manifest.get(
+                "dataset_version"
+            )
+        ),
+        config_hash=build_config_hash(
+            dataset_manifest
+        ),
+        git_commit=(
+            dataset_manifest.get(
+                "git_commit"
+            )
+        ),
+        feature_schema_source=(
+            feature_schema_source
+        ),
+        prediction_probe_payload=(
+            prediction_probe
+        ),
+    )
+
+    p_logger.info(
+        "Serving release published: "
+        "release_id=%s model_version=%s",
+        manifest.release_id,
+        manifest.model_version,
+    )
+
+    return manifest.to_dict()
