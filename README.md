@@ -512,7 +512,11 @@ cd mlops-churn-prediction
 cp .env.example .env
 ```
 
-Set at least a local `API_KEY` in `.env`.
+Set at least a local `API_KEY` in `.env`. Raw source data is intentionally
+excluded from Git. Download the
+[Telco Customer Churn dataset from Kaggle](https://www.kaggle.com/datasets/blastchar/telco-customer-churn),
+rename the downloaded CSV file to `Telco-Customer-Churn.csv` if necessary, and
+place it under `data/raw/`.
 
 ### 2. Create the environment
 
@@ -565,10 +569,10 @@ make predict-test
 ### 6. Run quality checks
 
 ```bash
-make lint
-make test
-docker compose config --quiet
+make check
 ```
+This runs Ruff, the unit and integration test suite, and Docker Compose
+configuration validation.
 
 ### 7. Register local Prefect automation
 
@@ -579,6 +583,28 @@ make prefect-worker
 ```
 
 Local Prefect uses `http://localhost:4200/api`. Production flow targets use the Prefect Cloud URL and API key from `.env`; the two configurations are intentionally separated.
+
+### Useful lifecycle commands
+
+| Command | Purpose |
+|---|---|
+| `make dev-up` | Build and start the complete local stack |
+| `make dev-down` | Stop the local stack |
+| `make train-bootstrap` | Create the initial Champion and serving release |
+| `make train` | Run normal training when the pre-training policy permits it |
+| `make train-force` | Force candidate training and evaluation |
+| `make auto-retrain` | Evaluate the retraining policy once |
+| `make predict-test` | Send an authenticated local prediction request |
+| `make demo-churn-lifecycle` | Run the delayed-label churn lifecycle demo |
+| `make rollback-serving RELEASE_ID=<id>` | Activate a previous validated serving release |
+| `make dashboard-logs` | Follow Streamlit dashboard logs |
+| `make check` | Run linting, tests and Compose validation |
+| `make reset-demo` | Remove generated demo state while retaining raw input data |
+| `make reset-local-stack CONFIRM_RESET=1` | Delete all local runtime and serving state |
+
+Local serving release IDs are stored below `models/serving_releases/`. The
+active release pointer is stored in `models/active_serving_release.json`.
+
 
 ---
 
@@ -616,6 +642,20 @@ terraform -chdir=infrastructure validate
 terraform -chdir=infrastructure plan
 terraform -chdir=infrastructure apply
 ```
+### Cost-conscious MLflow demo backend
+
+The portfolio deployment intentionally runs one warm MLflow Cloud Run instance
+with an ephemeral SQLite backend under `/tmp`. Model artifacts, dataset
+snapshots and immutable serving releases remain in Google Cloud Storage.
+
+This configuration keeps a temporary demonstration compact and inexpensive,
+but MLflow runs, registered model versions and aliases are not guaranteed to
+survive an instance or revision replacement. The warm instance must remain
+available while a production bootstrap or lifecycle demonstration is running.
+
+A continuously operated production environment should replace SQLite with a
+durable PostgreSQL backend such as Cloud SQL and add organization-specific
+backup, recovery, networking and access-control policies.
 
 Required production values are loaded from `.env`, GitHub Variables and GitHub Secrets. Validate the non-secret configuration locally:
 
@@ -652,8 +692,13 @@ curl -fsS "$API_URL/readyz" | jq .
 curl -fsS "$API_URL/health" | jq .
 ```
 
-`train-bootstrap-prod` is intended only for a fresh production registry. Once a Champion exists, use the normal production training path.
+`train-bootstrap-prod` is intended only for a fresh production registry. Once a
+Champion exists, use the normal production training path.
 
+Because the demonstration registry uses ephemeral SQLite storage, a new MLflow
+revision may require another explicit bootstrap. This limitation applies to the
+cost-conscious portfolio deployment, not to the recommended durable production
+architecture.
 ---
 
 ## 📈 Main API Endpoints
@@ -698,11 +743,40 @@ Secrets such as `API_KEY`, `PREFECT_API_KEY` and optional Slack webhooks must no
 
 ---
 
+## 📚 Documentation
+
+Detailed architecture and operational documentation is available in:
+
+- [System architecture](docs/architecture.md)
+- [Local development](docs/local-development.md)
+- [Google Cloud production demo](docs/production-demo.md)
+- [Serving releases and rollback](docs/serving-releases.md)
+- [Automatic retraining policy](docs/retraining-policy.md)
+- [Monitoring, SLOs and alerting](docs/monitoring-and-slos.md)
+- [Incident response runbook](docs/operations-runbook.md)
+
+---
+
 ## 📦 Dataset
 
-The project uses the Telco Customer Churn dataset as a realistic binary-classification example. The dataset is a vehicle for demonstrating reusable MLOps patterns rather than the central deliverable.
+The project uses the
+[Telco Customer Churn dataset](https://www.kaggle.com/datasets/blastchar/telco-customer-churn)
+available through Kaggle as a realistic binary-classification and
+retention-decisioning scenario.
 
-The architecture can be adapted to other supervised decisioning systems such as:
+The source file must be placed at:
+
+```text
+data/raw/Telco-Customer-Churn.csv
+```
+
+Raw dataset files are intentionally excluded from version control. Users are
+responsible for obtaining the dataset from an authorized source and complying
+with its original license and usage conditions.
+
+The dataset is a vehicle for demonstrating reusable MLOps patterns rather than
+the central deliverable. The architecture can be adapted to other supervised
+decisioning systems such as:
 
 - lead scoring
 - conversion prediction
@@ -710,8 +784,6 @@ The architecture can be adapted to other supervised decisioning systems such as:
 - upsell propensity
 - fraud or risk scoring
 - support escalation prediction
-
----
 
 ## ⚠️ Scope and Limitations
 
@@ -728,7 +800,11 @@ For a regulated or large-scale deployment, further controls may include:
 - multi-region recovery objectives
 - staged traffic splitting or shadow deployment
 
-The current cloud setup intentionally favors a compact, reproducible demonstration while implementing the central safety patterns of a production ML lifecycle.
+The current cloud setup intentionally favors a compact, reproducible
+demonstration while implementing the central safety patterns of a production ML
+lifecycle. The Cloud Run deployment uses ephemeral MLflow metadata storage and
+is therefore not intended as a continuously operated registry without a durable
+PostgreSQL backend.
 
 ---
 
@@ -743,6 +819,7 @@ MIT License
 **Steffen Lauterbach**  
 MLOps Engineer
 
-Focused on production-oriented ML systems, model deployment, monitoring, retraining workflows and cloud-native ML infrastructure.
+Focused on production-oriented ML systems, safe model deployment, monitoring,
+retraining workflows and cloud-native infrastructure.
 
 [LinkedIn](https://www.linkedin.com/in/92-steffen-lauterbach)
