@@ -24,7 +24,7 @@ from prefect import task, get_run_logger
 from src.utils.logger import get_logger
 
 from src.data.raw.ingest import ingest
-from src.data.features.build_features import run_feature_pipeline
+from src.data.features.pipeline import run_feature_pipeline
 from src.data.splits.split import split as split_logic
 from src.data.versioning import make_dataset_version, snapshot_current_datasets, log_dataset_manifest_to_mlflow
 
