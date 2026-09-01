@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+import src.api.serving_state as serving_state
 from src.inference.serving_bundle import (
     ServingArtifactReference,
     ServingBundle,
@@ -16,6 +17,7 @@ def build_test_manifest(
     model_run_id: str,
     decision_threshold: float = 0.5,
 ) -> ServingReleaseManifest:
+    """Build an immutable serving manifest for API tests."""
     model_name = (
         "customer-churn-model-dev"
     )
@@ -58,6 +60,7 @@ def build_test_bundle(
     model_run_id: str = "test-run-id",
     decision_threshold: float = 0.5,
 ) -> ServingBundle:
+    """Build a complete in-memory serving bundle for API tests."""
     manifest = build_test_manifest(
         release_id=release_id,
         model_version=model_version,
@@ -103,8 +106,7 @@ def mock_api_dependencies(
     mock_xgb_model,
 ):
     """
-    Mock API dependencies so integration tests do not depend on MLflow,
-    startup model loading, GCS, or the full feature pipeline.
+    Isolate API tests from MLflow, GCS and the complete feature pipeline.
     """
     monkeypatch.setenv(
         "API_KEY",
@@ -146,24 +148,35 @@ def mock_api_dependencies(
         model=mock_xgb_model,
     )
 
+    # API tests intentionally install an already validated bundle directly.
+    # Bundle validation itself is covered by dedicated unit tests.
+    monkeypatch.setattr(
+        serving_state,
+        "_active_serving_bundle",
+        mocked_bundle,
+    )
+    monkeypatch.setattr(
+        serving_state,
+        "_dq_reference_categories",
+        {},
+    )
+
     with (
         patch(
-            "src.api.app."
-            "active_serving_bundle",
-            mocked_bundle,
-        ),
-        patch(
-            "src.api.app."
+            "src.api.routers.prediction."
             "run_prediction_pipeline",
             return_value=(
                 mocked_pipeline_output
             ),
         ),
         patch(
-            "src.api.app.log_prediction",
+            "src.api.routers.prediction."
+            "log_prediction",
         ),
     ):
         yield
+
+    serving_state.clear_serving_bundle()
 
 
 def test_api_health_endpoint(
@@ -191,13 +204,11 @@ def test_predict_endpoint_validation_error(
     api_client,
     api_headers,
 ):
-    bad_payload = {
-        "inputs": [],
-    }
-
     response = api_client.post(
         "/predict",
-        json=bad_payload,
+        json={
+            "inputs": [],
+        },
         headers=api_headers,
     )
 
@@ -218,8 +229,8 @@ def test_predict_endpoint_success(
     assert response.status_code == 200
 
     body = response.json()
+
     assert body["status"] == "success"
-    assert "predictions" in body
     assert isinstance(
         body["predictions"],
         list,
@@ -228,9 +239,9 @@ def test_predict_endpoint_success(
         body["predictions"]
     ) == 1
 
-    prediction = body[
-        "predictions"
-    ][0]
+    prediction = (
+        body["predictions"][0]
+    )
 
     assert (
         prediction["churn_probability"]
@@ -243,20 +254,23 @@ def test_predict_endpoint_success(
         prediction["expected_value"]
         == 12.3
     )
-    assert prediction["customer_id"] == "1234-ABCDE"
-    assert "metadata" in body
-    assert body["metadata"]["rows"] == 1
-    assert (
-        body["metadata"]["request_id"]
-        == "test-request"
+    assert prediction["customer_id"] == (
+        "1234-ABCDE"
     )
-    assert body["metadata"]["release_id"] == (
+
+    metadata = body["metadata"]
+
+    assert metadata["rows"] == 1
+    assert metadata["request_id"] == (
+        "test-request"
+    )
+    assert metadata["release_id"] == (
         "test-release"
     )
-    assert body["metadata"]["model_version"] == (
+    assert metadata["model_version"] == (
         "test-version"
     )
-    assert body["metadata"]["model_run_id"] == (
+    assert metadata["model_run_id"] == (
         "test-run-id"
     )
 
@@ -321,10 +335,21 @@ def test_readyz_endpoint(
         body["decision_threshold"]
         == 0.5
     )
-    assert body["serving_bundle_loaded"] is True
-    assert body["release_id"] == "test-release"
-    assert body["feature_schema_loaded"] is True
-    assert body["decision_threshold_loaded"] is True
+    assert (
+        body["serving_bundle_loaded"]
+        is True
+    )
+    assert body["release_id"] == (
+        "test-release"
+    )
+    assert (
+        body["feature_schema_loaded"]
+        is True
+    )
+    assert (
+        body["decision_threshold_loaded"]
+        is True
+    )
 
 
 def test_livez_endpoint(
@@ -344,10 +369,9 @@ def test_livez_endpoint(
 
 
 def test_failed_bundle_reload_keeps_previous_serving_state(
+    monkeypatch,
     mock_xgb_model,
 ):
-    from src.api import app as api_app
-
     previous_bundle = build_test_bundle(
         model=mock_xgb_model,
         release_id="previous-release",
@@ -356,12 +380,15 @@ def test_failed_bundle_reload_keeps_previous_serving_state(
         decision_threshold=0.5,
     )
 
-    api_app.active_serving_bundle = (
-        previous_bundle
+    monkeypatch.setattr(
+        serving_state,
+        "_active_serving_bundle",
+        previous_bundle,
     )
 
     with patch(
-        "src.api.app.reload_model_state",
+        "src.api.serving_state."
+        "load_current_serving_bundle",
         side_effect=RuntimeError(
             "Replacement bundle is invalid."
         ),
@@ -372,20 +399,20 @@ def test_failed_bundle_reload_keeps_previous_serving_state(
                 "Replacement bundle is invalid"
             ),
         ):
-            api_app.reload_serving_model()
+            serving_state.reload_serving_model()
 
     assert (
-        api_app.active_serving_bundle
+        serving_state.get_active_serving_bundle()
         is previous_bundle
     )
+
 
 def test_rollback_serving_release(
     api_client,
     api_headers,
+    monkeypatch,
     mock_xgb_model,
 ):
-    from src.api import app as api_app
-
     previous_bundle = build_test_bundle(
         model=mock_xgb_model,
         release_id="release-new",
@@ -400,23 +427,25 @@ def test_rollback_serving_release(
         model_run_id="run-7",
     )
 
-    api_app.active_serving_bundle = (
-        previous_bundle
+    monkeypatch.setattr(
+        serving_state,
+        "_active_serving_bundle",
+        previous_bundle,
     )
 
     with (
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "load_active_release_id",
             return_value="release-new",
         ),
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "load_serving_bundle_for_release",
             return_value=rollback_bundle,
         ) as load_bundle,
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "activate_release_pointer",
         ) as activate_pointer,
     ):
@@ -426,7 +455,9 @@ def test_rollback_serving_release(
                 "rollback-serving-release"
             ),
             json={
-                "release_id": "release-old",
+                "release_id": (
+                    "release-old"
+                ),
             },
             headers=api_headers,
         )
@@ -447,19 +478,25 @@ def test_rollback_serving_release(
     assert body["model_version"] == "7"
 
     assert (
-        api_app.active_serving_bundle
+        serving_state.get_active_serving_bundle()
         is rollback_bundle
     )
 
     load_bundle.assert_called_once_with(
         release_id="release-old",
-        model_name=api_app.MODEL_NAME,
-        cfg=api_app.CFG,
-        models_path=api_app.MODELS_PATH,
+        model_name=(
+            serving_state.MODEL_NAME
+        ),
+        cfg=serving_state.CFG,
+        models_path=(
+            serving_state.MODELS_PATH
+        ),
     )
 
     activate_pointer.assert_called_once_with(
-        models_path=api_app.MODELS_PATH,
+        models_path=(
+            serving_state.MODELS_PATH
+        ),
         release_id="release-old",
         operation="rollback",
         previous_release_id=(
@@ -471,10 +508,9 @@ def test_rollback_serving_release(
 def test_failed_rollback_keeps_previous_bundle(
     api_client,
     api_headers,
+    monkeypatch,
     mock_xgb_model,
 ):
-    from src.api import app as api_app
-
     previous_bundle = build_test_bundle(
         model=mock_xgb_model,
         release_id="release-new",
@@ -482,25 +518,27 @@ def test_failed_rollback_keeps_previous_bundle(
         model_run_id="run-8",
     )
 
-    api_app.active_serving_bundle = (
-        previous_bundle
+    monkeypatch.setattr(
+        serving_state,
+        "_active_serving_bundle",
+        previous_bundle,
     )
 
     with (
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "load_active_release_id",
             return_value="release-new",
         ),
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "load_serving_bundle_for_release",
             side_effect=ValueError(
                 "Rollback release is invalid."
             ),
         ),
         patch(
-            "src.api.app."
+            "src.api.routers.admin."
             "activate_release_pointer",
         ) as activate_pointer,
     ):
@@ -510,7 +548,9 @@ def test_failed_rollback_keeps_previous_bundle(
                 "rollback-serving-release"
             ),
             json={
-                "release_id": "release-old",
+                "release_id": (
+                    "release-old"
+                ),
             },
             headers=api_headers,
         )
@@ -518,7 +558,7 @@ def test_failed_rollback_keeps_previous_bundle(
     assert response.status_code == 500
 
     assert (
-        api_app.active_serving_bundle
+        serving_state.get_active_serving_bundle()
         is previous_bundle
     )
 

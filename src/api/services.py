@@ -27,10 +27,11 @@ def run_prediction_pipeline(
     decision_threshold: float = 0.5,
 ):
     """
-    Execute the active model and decision pipeline for validated customer rows.
+    Execute validation, data-quality checks, feature processing and inference.
 
     Returns:
-        Prediction and decision results together with serving lineage and timing.
+        Prediction results, stage timings, data-quality summary, request ID and
+        runtime environment.
     """
     request_started = time.perf_counter()
     timings: dict[str, float] = {}
@@ -94,7 +95,7 @@ def run_prediction_pipeline(
 
 
 def attach_customer_ids(inputs: list[dict], results: list[dict]) -> list[dict]:
-    """Attach request customer identifiers to model and decision results."""
+    """Attach request customer identifiers to prediction results."""
     enriched = []
 
     for original_input, result in zip(inputs, results):
@@ -113,7 +114,14 @@ def prioritize_results(
     top_n: int | None = None,
     min_expected_value: float | None = None,
 ) -> list[dict]:
-    """Sort customer decisions by descending expected retention value."""
+    """
+    Filter and rank customer decisions by expected value.
+
+    Args:
+        results: Customer-level prediction and decision results.
+        top_n: Maximum number of results to return.
+        min_expected_value: Optional minimum expected-value threshold.
+    """
     prioritized = results
 
     if min_expected_value is not None:
@@ -135,7 +143,7 @@ def prioritize_results(
 
 
 def compute_business_kpis(results: list[dict]) -> dict:
-    """Aggregate customer-level decisions into campaign business KPIs."""
+    """Aggregate customer-level decisions into retention business KPIs."""
     total_expected_value = sum(float(r.get("expected_value") or 0.0) for r in results)
 
     return {
@@ -158,7 +166,7 @@ def compute_business_kpis(results: list[dict]) -> dict:
     }
 
 def simulate_campaign(results: list[dict]) -> dict:
-    """Simulate campaign cost, retained value and net expected value."""
+    """Aggregate prioritized decisions into campaign-impact metrics."""
     total_expected_value = sum(
         float(r.get("expected_value") or 0.0) for r in results
     )
