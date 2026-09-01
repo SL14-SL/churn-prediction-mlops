@@ -54,6 +54,13 @@ def get_business_settings() -> dict:
     }
 
 def get_retraining_settings() -> dict:
+    """
+    Return normalized retraining-policy settings with operational defaults.
+
+    Returns:
+        Thresholds and windows controlling data availability, cooldown, scheduled
+        retraining, drift persistence, model performance and business outcomes.
+    """
     monitoring_cfg = (
         get_monitoring_config()
     )

@@ -7,6 +7,7 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class SignalEvaluation:
+    """Normalized monitoring-signal result consumed by retraining policy."""
     triggered: bool
     window_end: str | None
     reason: str

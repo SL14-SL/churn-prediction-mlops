@@ -25,6 +25,12 @@ from src.monitoring.monitoring_refresh import refresh_monitoring_signals
 def parse_evaluated_at(
     value: str,
 ) -> datetime:
+    """
+    Parse a retraining decision timestamp as a timezone-aware UTC datetime.
+
+    Raises:
+        ValueError: If the supplied timestamp cannot be parsed.
+    """
     parsed = datetime.fromisoformat(
         value.replace("Z", "+00:00")
     )
@@ -40,6 +46,7 @@ def parse_evaluated_at(
 
 @task(name="Refresh Monitoring Signals")
 def task_refresh_monitoring_signals():
+    """Refresh and persist all monitoring signals consumed by retraining policy."""
     logger = get_run_logger()
 
     result = (
@@ -69,7 +76,16 @@ def auto_retrain_flow(
     evaluated_at: datetime | None = None,
     simulation_day: int | None = None,
 ) -> dict[str, Any]:
-    
+    """
+    Evaluate retraining signals and execute at most one authorized training run.
+
+    The flow refreshes monitoring data, evaluates policy gates, prevents duplicate
+    decision processing and records the outcome of successful training runs.
+
+    Returns:
+        A status dictionary describing whether retraining was blocked, skipped,
+        treated as a duplicate or executed.
+    """
     logger = get_run_logger()
 
     task_refresh_monitoring_signals()

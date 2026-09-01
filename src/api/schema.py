@@ -100,6 +100,7 @@ class PredictionResponse(BaseModel):
     )
 
 class PrioritizeRequest(PredictionRequest):
+    """Request containing customers to score and prioritize for retention."""
     top_n: int | None = Field(
         default=None,
         ge=1,
@@ -111,15 +112,15 @@ class PrioritizeRequest(PredictionRequest):
     )
 
 class CampaignSimulationRequest(PrioritizeRequest):
+    """Request parameters for simulating a retention campaign."""
     campaign_name: str | None = Field(
         default=None,
         description="Optional campaign name for reporting",
     )
 
 
-class ServingRollbackRequest(
-    BaseModel
-):
+class ServingRollbackRequest(BaseModel):
+    """Request identifying the immutable serving release to reactivate."""
     release_id: str = Field(
         ...,
         min_length=1,

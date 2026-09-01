@@ -227,6 +227,7 @@ setup_swagger_ui_theme(
 # --- Middleware for Monitoring & Prometheus ---
 @app.middleware("http")
 async def serving_monitoring_middleware(request: Request, call_next):
+    """Record latency, status and exception metrics for serving requests."""
     if not SERVING_CFG.get("enabled", True):
         return await call_next(request)
 
@@ -415,6 +416,7 @@ def rollback_serving_release(
 
 @app.get("/health")
 def health(response: Response):
+    """Return compatibility health information for the active serving bundle."""
     bundle = active_serving_bundle
     is_healthy = bundle is not None
 
@@ -544,6 +546,13 @@ def explain(payload: PredictionRequest, top_n: int = 5):
 
 @app.post("/predict", dependencies=[Depends(get_api_key)], response_model=PredictionResponse)
 def predict(payload: PredictionRequest):
+    """
+    Predict churn risk and determine the recommended retention action.
+
+    Returns:
+        Customer-level churn probabilities, classifications, recommended actions
+        and serving-release lineage.
+    """
     bundle = require_active_serving_bundle()
 
     try:
@@ -598,6 +607,12 @@ def predict(payload: PredictionRequest):
     
 @app.post("/prioritize", dependencies=[Depends(get_api_key)], response_model=PredictionResponse)
 def prioritize(payload: PrioritizeRequest):
+    """
+    Score and rank customers by expected retention value.
+
+    Returns:
+        Prioritized customer decisions ordered by their expected business impact.
+    """
     bundle = require_active_serving_bundle()
 
     try:

@@ -33,6 +33,7 @@ from src.inference.releases.storage import (
 def build_release_id(
     model_version: str,
 ) -> str:
+    """Build a unique and sortable identifier for an immutable serving release."""
     timestamp = datetime.now(
         timezone.utc
     ).strftime("%Y%m%dT%H%M%SZ")

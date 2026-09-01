@@ -6,6 +6,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class DecisionConfig:
+    """Configuration governing churn classification and retention decisions."""
     # Business values
     customer_value: float
     cost_discount: float
@@ -19,6 +20,7 @@ class DecisionConfig:
 
     @classmethod
     def from_config(cls, cfg: dict):
+        """Build decision settings from the effective project configuration."""
         decision_cfg = cfg.get("decision", {})
 
         return cls(
@@ -33,6 +35,12 @@ class DecisionConfig:
 
 
 class DecisionEngine:
+    """
+    Convert churn probabilities into economically ranked retention actions.
+
+    The engine compares the expected value of available actions using customer
+    value, intervention cost, treatment effectiveness and decision thresholds.
+    """
     def __init__(self, config: DecisionConfig):
         self.config = config
 

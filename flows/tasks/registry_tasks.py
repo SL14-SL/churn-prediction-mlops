@@ -27,6 +27,12 @@ TRAIN_CFG = load_config("training.yaml")
 
 @task(name="Evaluate Current Champion")
 def task_evaluate_champion():
+    """
+    Evaluate the current Champion for monitoring continuity.
+
+    Returns:
+        Champion evaluation metrics, or None when evaluation cannot be completed.
+    """
     p_logger = get_run_logger()
     p_logger.info("Evaluating current champion for dashboard continuity.")
     try:

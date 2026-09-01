@@ -34,6 +34,7 @@ MODEL_NAME = ENV_CFG["model"]["registry_name"]
 
 
 def resolve_api_base_url() -> str:
+    """Resolve the API base URL from a configured prediction endpoint."""
     api_url = (
         ENV_CFG.get(
             "api",
@@ -55,6 +56,12 @@ def resolve_api_base_url() -> str:
 
 
 def require_api_key() -> str:
+    """
+    Return the configured API key.
+
+    Raises:
+        RuntimeError: If no API key is available.
+    """
     api_key = os.getenv(
         "API_KEY"
     )

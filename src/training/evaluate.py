@@ -322,6 +322,7 @@ def _load_and_prep_recent_production_data(
 
 
 def get_decision_threshold_from_run(run_id: str, default: float = 0.5) -> float:
+    """Return the decision threshold recorded for an MLflow run."""
     client = MlflowClient()
     run = client.get_run(run_id)
     value = run.data.params.get("decision_threshold")
@@ -333,6 +334,7 @@ def get_decision_threshold_from_run(run_id: str, default: float = 0.5) -> float:
 
 
 def predict_with_threshold(model, X_val, threshold: float):
+    """Convert model probabilities into binary predictions using a threshold."""
     preds = model.predict(X_val)
 
     # pyfunc returns probabilities for your churn model
@@ -525,6 +527,7 @@ def calculate_model_metrics(
 def get_promotion_thresholds() -> (
     PromotionThresholds
 ):
+    """Build normalized model-promotion thresholds from training configuration."""
     cfg = TRAIN_CFG.get(
         "promotion",
         {},
@@ -569,6 +572,12 @@ def evaluate_reference_safety(
     champion_metrics: dict,
     thresholds: PromotionThresholds,
 ) -> dict[str, bool]:
+    """
+    Evaluate whether the Champion reference data is safe for model comparison.
+
+    Returns:
+        Safety status, reasons and reference-dataset diagnostics.
+    """
     reference_cfg = (
         TRAIN_CFG.get(
             "promotion",
@@ -740,11 +749,14 @@ def compare_models(
     val_path: str | None = None,
 ):
     """
-    Compare Challenger and Champion on recent production data.
+    Compare a Candidate with the current Champion across technical and business gates.
 
-    Recent labeled production data is the primary promotion dataset
-    when enough samples are available. The original validation split
-    remains a reference safety gate.
+    The comparison evaluates predictive quality, calibration, retention economics
+    and reference-data safety before applying the configured promotion policy.
+
+    Returns:
+        Whether the Candidate is accepted and a complete auditable comparison
+        payload.
     """
     del val_path
 

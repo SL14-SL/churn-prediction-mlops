@@ -115,6 +115,17 @@ def predict_and_decide(
     raw_input_df: pd.DataFrame | None = None,
     decision_threshold: float = 0.5,
 ) -> list[dict]:
+    """
+    Generate churn predictions and translate them into retention decisions.
+
+    Args:
+        model: Loaded churn estimator or MLflow model wrapper.
+        features: Validated and model-aligned customer features.
+        artifacts: Inference metadata including schema and decision settings.
+
+    Returns:
+        Customer-level predictions, actions and expected-value estimates.
+    """
 
     decision_engine = _build_decision_engine()
 

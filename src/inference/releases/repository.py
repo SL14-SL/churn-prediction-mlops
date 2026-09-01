@@ -38,6 +38,7 @@ def load_serving_manifest(
     ServingReleaseManifest,
     str,
 ]:
+    """Load and validate the manifest of one immutable serving release."""
     paths = build_release_paths(
         models_path=models_path,
         release_id=release_id,
@@ -120,6 +121,7 @@ def load_active_serving_manifest(
     ServingReleaseManifest,
     str,
 ]:
+    """Load the manifest referenced by the active-release pointer."""
     release_id = load_active_release_id(
         models_path=models_path,
     )
@@ -159,6 +161,13 @@ def load_active_release_id(
     *,
     models_path: str,
 ) -> str:
+    """
+    Return the active serving-release identifier.
+
+    Raises:
+        FileNotFoundError: If no active-release pointer exists.
+        ValueError: If the pointer contains no release identifier.
+    """
     pointer_path = join_uri(
         models_path,
         ACTIVE_RELEASE_FILE_NAME,
@@ -242,6 +251,7 @@ def list_serving_release_manifests(
     *,
     models_path: str,
 ) -> list[ServingReleaseManifest]:
+    """Load all serving-release manifests ordered from newest to oldest."""
     pattern = join_uri(
         models_path,
         RELEASES_DIRECTORY_NAME,

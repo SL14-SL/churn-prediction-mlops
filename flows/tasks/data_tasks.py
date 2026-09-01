@@ -71,6 +71,7 @@ def task_check_drift() -> bool:
 
 @task(name="Data Processing & Feature State Update")
 def task_prepare_data(is_drift_run: bool):
+    """Run ingestion, feature generation and dataset splitting for training."""
     p_logger = get_run_logger()
     p_logger.info(f"Starting data preparation (Emergency Mode: {is_drift_run})")
     ingest()
@@ -80,6 +81,12 @@ def task_prepare_data(is_drift_run: bool):
 
 @task(name="Snapshot Dataset Version")
 def task_snapshot_dataset():
+    """
+    Create an immutable snapshot of the prepared training datasets.
+
+    Returns:
+        The dataset manifest containing version and snapshot metadata.
+    """
     p_logger = get_run_logger()
     version_id = make_dataset_version()
     manifest = snapshot_current_datasets(version_id)
@@ -88,6 +95,12 @@ def task_snapshot_dataset():
 
 @task(name="Log Dataset Metadata")
 def task_log_dataset_metadata(run_id: str, dataset_manifest: dict):
+    """
+    Attach dataset lineage metadata to an existing MLflow run.
+
+    Notes:
+        Logging failures are reported as warnings and do not abort the flow.
+    """
     p_logger = get_run_logger()
     try:
         with mlflow.start_run(run_id=run_id):

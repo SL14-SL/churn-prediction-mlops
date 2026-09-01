@@ -8,6 +8,7 @@ from typing import Any
 
 
 class RetrainingAction(StrEnum):
+    """Policy action controlling whether automated retraining may proceed."""
     SKIP = "skip"
     TRAIN_CANDIDATE = "train_candidate"
     BLOCK = "block"
@@ -47,6 +48,7 @@ class RetrainingSignals:
 
 @dataclass(frozen=True)
 class RetrainingDecision:
+    """Immutable and reproducibly identified retraining-policy result."""
     action: RetrainingAction
     decision_id: str
     reasons: tuple[str, ...]

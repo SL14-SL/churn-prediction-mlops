@@ -3,6 +3,7 @@ import pandas as pd
 
 
 class ChurnModelWrapper(mlflow.pyfunc.PythonModel):
+    """MLflow PyFunc adapter exposing churn probabilities and classifications."""
     def __init__(self, model, threshold=None):
         self.model = model
         self.threshold = threshold

@@ -166,6 +166,12 @@ def get_latest_dataset_manifest() -> dict:
 
 
 def log_dataset_manifest_to_mlflow(manifest: dict):
+    """
+    Log dataset lineage, snapshot paths and effective configuration to MLflow.
+
+    Notes:
+        The function expects an active MLflow run.
+    """
     dataset_version = manifest["dataset_version"]
 
     mlflow.log_param("dataset_version", dataset_version)

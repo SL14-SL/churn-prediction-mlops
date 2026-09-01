@@ -9,6 +9,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class PromotionThresholds:
+    """Thresholds governing technical and business model-promotion gates."""
     minimum_realized_profit_improvement: float
 
     maximum_f1_degradation: float
@@ -19,6 +20,7 @@ class PromotionThresholds:
 
 @dataclass(frozen=True)
 class PromotionDecision:
+    """Complete auditable result of applying all promotion gates."""
     promote: bool
     reasons: tuple[str, ...]
     gates: dict[str, bool]

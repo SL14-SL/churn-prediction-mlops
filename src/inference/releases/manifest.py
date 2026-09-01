@@ -18,6 +18,7 @@ def _parse_artifact_reference(
     payload: dict[str, Any],
     field_name: str,
 ) -> ServingArtifactReference:
+    """Parse and validate one required serving-artifact reference."""
     reference = payload.get(
         field_name
     )
@@ -47,6 +48,7 @@ def _parse_optional_artifact_reference(
     payload: dict[str, Any],
     field_name: str,
 ) -> ServingArtifactReference | None:
+    """Parse an optional serving-artifact reference when present."""
     reference = payload.get(
         field_name
     )

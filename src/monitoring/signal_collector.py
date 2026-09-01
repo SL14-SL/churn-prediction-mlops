@@ -202,6 +202,12 @@ def _cooldown_active(
     evaluated_at: pd.Timestamp,
     cooldown_hours: int,
 ) -> bool:
+    """
+    Determine whether the latest successful retraining is within the cooldown.
+
+    Returns:
+        True if the cooldown period is active, otherwise False.
+    """
     last_retrained_at = state.get(
         "last_retrained_at_utc"
     )

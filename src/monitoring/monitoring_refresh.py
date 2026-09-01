@@ -26,6 +26,7 @@ from src.monitoring.performance import (
 
 @dataclass(frozen=True)
 class MonitoringRefreshResult:
+    """Outcome and row counts from refreshing persisted monitoring signals."""
     ground_truth_rows: int
     performance_updated: bool
     performance_rows: int

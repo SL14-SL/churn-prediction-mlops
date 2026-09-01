@@ -167,6 +167,12 @@ def build_alert_notification(
 def receive_alerts(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    """
+    Receive Alertmanager events and dispatch eligible retraining actions.
+
+    The endpoint applies alert filtering, idempotency and cooldown controls before
+    starting the automated retraining flow.
+    """
     try:
         notification = (
             build_alert_notification(
