@@ -139,10 +139,11 @@ prefect-setup: wait-prefect prefect-pool ## Register or update local Prefect dep
 	@echo "🧭 Registering local Prefect deployment..."
 	@APP_ENV=dev \
 		PREFECT_API_URL="$(LOCAL_PREFECT_API_URL)" \
-		PREFECT_API_KEY= \
-		MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)" \
-		uv run --active python scripts/setup_prefect.py
-
+	PREFECT_API_KEY= \
+	MLFLOW_TRACKING_URI="$(LOCAL_MLFLOW_TRACKING_URI)" \
+	uv run --active prefect deploy \
+		--name auto-retrain
+		
 prefect-worker: wait-prefect prefect-pool ## Start Prefect worker for the local pool
 	@echo "👷 Starting Prefect worker for pool '$(PREFECT_POOL)'..."
 	PREFECT_API_URL="$(LOCAL_PREFECT_API_URL)" \
