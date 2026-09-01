@@ -7,7 +7,7 @@ import fsspec
 import mlflow
 
 from src.data.versioning import log_dataset_manifest_to_mlflow
-from src.training.evaluate import compare_models
+from src.training.model_comparison import compare_models
 from src.training.train import train
 
 

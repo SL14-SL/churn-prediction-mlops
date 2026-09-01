@@ -17,8 +17,8 @@ from prefect import task, get_run_logger
 # ruff: noqa: E402
 
 from src.training.register import register_model, champion_exists
-from src.training.evaluate import compare_models, evaluate_model
-
+from src.training.evaluate import evaluate_model
+from src.training.model_comparison import compare_models
 
 # --- INITIALIZE CONFIGURATION ---
 GCP_CFG = load_config("gcp.yaml")
