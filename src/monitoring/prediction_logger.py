@@ -16,6 +16,41 @@ logger = get_logger(__name__)
 
 PREDICTIONS = get_path("predictions")
 
+STRING_LOG_COLUMNS = {
+    "customerID",
+    "customerid",
+    "customer_id",
+    "TotalCharges",
+    "prediction_id",
+    "prediction_timestamp",
+    "prediction_date",
+    "environment",
+    "model_alias",
+    "model_version",
+    "model_run_id",
+    "request_id",
+    "action",
+}
+
+
+def normalize_prediction_log_schema(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Normalize prediction-log columns before parquet persistence.
+
+    Raw API payloads can represent fields such as `TotalCharges` with different
+    inferred Python types. Converting identifier, metadata, and string-valued
+    feature columns consistently prevents mixed parquet schemas.
+    """
+    df = df.copy()
+
+    for column in STRING_LOG_COLUMNS:
+        if column in df.columns:
+            df[column] = df[column].astype("string")
+
+    return df
+
 
 def _build_daily_log_path(prediction_date: str) -> str:
     return f"{PREDICTIONS}/history/prediction_date={prediction_date}/inference_log.parquet"
@@ -98,41 +133,43 @@ def log_prediction(
             "customer_value": customer_value,
             **metadata,
         }
-        df_new = pd.DataFrame([log_data])
 
-        for col in [
-            "prediction_id",
-            "prediction_timestamp",
-            "prediction_date",
-            "environment",
-            "model_alias",
-            "model_version",
-            "model_run_id",
-            "request_id",
-            "action",
-        ]:
-            if col in df_new.columns:
-                df_new[col] = df_new[col].astype("string")
+        df_new = normalize_prediction_log_schema(
+            pd.DataFrame([log_data])
+        )
 
         # --- Legacy single-file log (keep for backward compatibility) ---
         legacy_log_file = os.path.join(PREDICTIONS, "inference_log.parquet")
 
         if file_exists(legacy_log_file):
-            df_existing = pd.read_parquet(legacy_log_file)
-            df_all = pd.concat([df_existing, df_new], ignore_index=True)
+            df_existing = normalize_prediction_log_schema(
+                pd.read_parquet(legacy_log_file)
+            )
+            df_all = pd.concat(
+                [df_existing, df_new],
+                ignore_index=True,
+            )
         else:
             df_all = df_new
 
+        df_all = normalize_prediction_log_schema(df_all)
         df_all.to_parquet(legacy_log_file, index=False)
 
         # --- New daily-partitioned log ---
         daily_log_file = _build_daily_log_path(prediction_date)
 
         if file_exists(daily_log_file):
-            daily_existing = pd.read_parquet(daily_log_file)
-            daily_all = pd.concat([daily_existing, df_new], ignore_index=True)
+            daily_existing = normalize_prediction_log_schema(
+                pd.read_parquet(daily_log_file)
+            )
+            daily_all = pd.concat(
+                [daily_existing, df_new],
+                ignore_index=True,
+            )
         else:
             daily_all = df_new
+
+        daily_all = normalize_prediction_log_schema(daily_all)
 
         if not daily_log_file.startswith("gs://"):
             Path(daily_log_file).parent.mkdir(parents=True, exist_ok=True)

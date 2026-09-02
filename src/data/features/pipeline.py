@@ -3,7 +3,7 @@ import pandas as pd
 from src.configs.loader import get_path, load_config
 from src.storage.filesystem import file_exists
 from src.utils.logger import get_logger
-from src.data.features import build_features
+from src.data.features.build_features import build_features
 
 logger = get_logger(__name__)
 
@@ -16,7 +16,7 @@ def run_feature_pipeline(config: dict | None = None) -> None:
     """
     End-to-end pipeline: Load validated data -> Build features -> Save.
     """
-    config = config or TRAIN_CFG
+    config = TRAIN_CFG if config is None else config
     logger.info(f"Starting feature pipeline. Data source: {VALIDATED_PATH}")
 
     try:

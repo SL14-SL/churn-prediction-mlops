@@ -14,7 +14,7 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	ui-prefect ui-mlflow prefect-status wait-prefect prefect-pool \
 	prefect-setup prefect-worker train train-force train-bootstrap \
 	auto-retrain predict-test demo-churn-lifecycle reset-local-stack \
-	rollback-serving \
+	rollback-serving test-serving-e2e test-serving-rollback-e2e \
 	check-prod-env debug-prod-env prepare-mlflow-prod-demo upload-raw-prod \
 	predict-test-prod train-bootstrap-prod train-force-prod verify-prod \
 	bootstrap-and-verify-prod compose-check check test lint clean clean-venv \
@@ -22,7 +22,7 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	churn-retraining-comparison churn-retraining-comparison-smoke \
 	churn-cohort-shift-comparison-plot churn-concept-drift-comparison \
 	churn-concept-drift-comparison-smoke churn-concept-drift-comparison-plot \
-	churn-retraining-comparison-plot
+	churn-retraining-comparison-plot \
 
 # --- Main Entry Point ---
 
@@ -159,11 +159,14 @@ ui-mlflow: ## Open local MLflow UI in the browser
 
 # Container-internal local service addresses.
 COMPOSE_RUN_API = docker compose exec -T \
+	-e HOME=/tmp \
+	-e PREFECT_HOME=/tmp/prefect \
 	-e APP_ENV=dev \
 	-e MLFLOW_TRACKING_URI=http://mlflow:5000 \
 	-e PREFECT_API_URL=http://prefect:4200/api \
 	-e PREFECT_API_KEY= \
 	-e PREDICTION_API_URL=http://api:8080/predict \
+	-e API_BASE_URL=http://localhost:8080 \
 	api
 
 # --- Local ML Pipeline Tasks ---
@@ -264,6 +267,18 @@ rollback-serving: ## Roll back local serving to RELEASE_ID
 		-H "X-API-KEY: $(API_KEY)" \
 		-d '{"release_id":"$(RELEASE_ID)"}' \
 		| jq .
+
+test-serving-e2e: ## Verify the active serving release end to end
+	@echo "🧪 Verifying active serving release end to end..."
+	$(COMPOSE_RUN_API) \
+		uv run --no-sync python \
+		scripts/test_serving_lifecycle.py
+
+test-serving-rollback-e2e: ## Verify rollback and restoration of a serving release
+	@echo "🧪 Verifying serving rollback lifecycle..."
+	$(COMPOSE_RUN_API) \
+		uv run --no-sync python \
+		scripts/test_serving_rollback_lifecycle.py
 
 # --- Production Helpers ---
 PRODUCTION_API_BASE_URL = $(patsubst %/predict,%,$(PREDICTION_API_URL))
