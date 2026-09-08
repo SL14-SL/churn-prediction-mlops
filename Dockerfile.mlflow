@@ -31,11 +31,16 @@ RUN python -m pip uninstall -y pip setuptools \
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "exec mlflow server \
+CMD ["sh", "-c", "if [ -n \"$CLOUD_SQL_CONNECTION_NAME\" ]; then \
+  BACKEND_STORE_URI=\"postgresql+psycopg2://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@/${MLFLOW_DB_NAME}?host=/cloudsql/${CLOUD_SQL_CONNECTION_NAME}\"; \
+else \
+  BACKEND_STORE_URI=\"$MLFLOW_BACKEND_STORE_URI\"; \
+fi; \
+exec mlflow server \
   --host 0.0.0.0 \
   --port ${PORT:-5000} \
   --workers 1 \
-  --backend-store-uri \"$MLFLOW_BACKEND_STORE_URI\" \
+  --backend-store-uri \"$BACKEND_STORE_URI\" \
   --default-artifact-root \"$MLFLOW_ARTIFACT_ROOT\" \
   --allowed-hosts \"$MLFLOW_SERVER_ALLOWED_HOSTS\" \
   --cors-allowed-origins \"$MLFLOW_SERVER_CORS_ALLOWED_ORIGINS\""]

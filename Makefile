@@ -9,6 +9,7 @@ LOCAL_MLFLOW_TRACKING_URI := http://localhost:5000
 LOCAL_PREFECT_API_URL := http://localhost:4200/api
 PREFECT_POOL ?= local-pool
 PREFECT_PROJECT_DIR ?= $(CURDIR)
+MLFLOW_DATABASE_INSTANCE ?= mlflow-postgres-dev
 
 .PHONY: all help setup dev dev-up dev-down logs dashboard-logs refresh-api \
 	ui-prefect ui-mlflow prefect-status wait-prefect prefect-pool \
@@ -23,6 +24,7 @@ PREFECT_PROJECT_DIR ?= $(CURDIR)
 	churn-cohort-shift-comparison-plot churn-concept-drift-comparison \
 	churn-concept-drift-comparison-smoke churn-concept-drift-comparison-plot \
 	churn-retraining-comparison-plot \
+	start-mlflow-db-prod stop-mlflow-db-prod
 
 # --- Main Entry Point ---
 
@@ -301,6 +303,8 @@ check-prod-env: ## Validate required production environment variables
 		(echo "❌ PREFECT_API_KEY is missing." && exit 1)
 	@test -n "$(API_KEY)" || \
 		(echo "❌ API_KEY is missing." && exit 1)
+	@test -n "$(MLFLOW_DATABASE_INSTANCE)" || \
+		(echo "❌ MLFLOW_DATABASE_INSTANCE is missing." && exit 1)
 	@case "$(MLFLOW_UI_URL)" in \
 		http://localhost*|http://mlflow*) \
 			echo "❌ MLFLOW_UI_URL points to a local service."; \
@@ -328,23 +332,39 @@ debug-prod-env: ## Show non-secret production values loaded by Make
 	@echo "PREFECT_API_KEY configured: $$(test -n "$(PREFECT_API_KEY)" && echo yes || echo no)"
 	@echo "API_KEY configured: $$(test -n "$(API_KEY)" && echo yes || echo no)"
 
-prepare-mlflow-prod-demo: check-prod-env ## Prepare one warm MLflow instance for the ephemeral cloud demo
-	@echo "🔥 Preparing ephemeral MLflow production demo..."
-	@gcloud run services update \
-		mlflow-server \
+start-mlflow-db-prod: check-prod-env ## Start the persistent MLflow Cloud SQL instance
+	@echo "▶️ Starting Cloud SQL instance $(MLFLOW_DATABASE_INSTANCE)..."
+	gcloud sql instances patch \
+		"$(MLFLOW_DATABASE_INSTANCE)" \
 		--project "$(GCP_PROJECT_ID)" \
-		--region "$(GCP_REGION)" \
-		--update-env-vars "^@^MLFLOW_BACKEND_STORE_URI=sqlite:////tmp/mlflow.db@MLFLOW_SERVER_CORS_ALLOWED_ORIGINS=$(MLFLOW_UI_URL)" \
-		--memory 4Gi \
-		--min 1 \
-		--max 1 \
+		--activation-policy ALWAYS \
 		--quiet
+	@echo "✅ Cloud SQL instance is running."
+
+prepare-mlflow-prod-demo: start-mlflow-db-prod ## Prepare persistent MLflow production demo
+	@echo "🔥 Preparing persistent MLflow production demo..."
 	@echo "⏳ Waiting for MLflow health endpoint..."
-	@until curl -fsS "$(MLFLOW_UI_URL)/health" > /dev/null; do \
-		echo "MLflow is not ready yet..."; \
-		sleep 2; \
-	done
-	@echo "✅ MLflow demo instance is ready."
+	@attempt=1; \
+	while [ $$attempt -le 60 ]; do \
+		if curl -fsS "$(MLFLOW_UI_URL)/health" > /dev/null; then \
+			echo "✅ MLflow is ready."; \
+			exit 0; \
+		fi; \
+		echo "MLflow is not ready yet: attempt=$$attempt"; \
+		attempt=$$((attempt + 1)); \
+		sleep 5; \
+	done; \
+	echo "❌ MLflow did not become healthy."; \
+	exit 1
+
+stop-mlflow-db-prod: check-prod-env ## Stop the MLflow Cloud SQL instance to limit costs
+	@echo "⏹️ Stopping Cloud SQL instance $(MLFLOW_DATABASE_INSTANCE)..."
+	gcloud sql instances patch \
+		"$(MLFLOW_DATABASE_INSTANCE)" \
+		--project "$(GCP_PROJECT_ID)" \
+		--activation-policy NEVER \
+		--quiet
+	@echo "✅ Cloud SQL instance stopped."
 
 upload-raw-prod: check-prod-env ## Upload raw churn data to production GCS bucket
 	@echo "☁️ Uploading raw churn data to gs://$(GCP_BUCKET_NAME)/data/raw/..."

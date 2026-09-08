@@ -11,7 +11,9 @@ resource "google_project_service" "base_services" {
     "artifactregistry.googleapis.com",
     "iam.googleapis.com",
     "storage.googleapis.com",
-    "cloudresourcemanager.googleapis.com"
+    "cloudresourcemanager.googleapis.com",
+    "sqladmin.googleapis.com",
+    "secretmanager.googleapis.com"
   ])
 
   service            = each.key
@@ -52,6 +54,70 @@ resource "google_artifact_registry_repository" "mlops_repo" {
   depends_on = [null_resource.wait_for_apis]
 }
 
+# --- Persistent MLflow PostgreSQL Backend ---
+
+resource "random_password" "mlflow_database" {
+  length  = 32
+  special = false
+}
+
+resource "google_sql_database_instance" "mlflow" {
+  name             = "mlflow-postgres-dev"
+  database_version = "POSTGRES_15"
+  region           = var.region
+
+  deletion_protection = false
+
+  settings {
+    tier              = "db-f1-micro"
+    availability_type = "ZONAL"
+    disk_type         = "PD_SSD"
+    disk_size         = 10
+    disk_autoresize   = true
+
+    backup_configuration {
+      enabled                        = true
+      point_in_time_recovery_enabled = false
+    }
+
+    ip_configuration {
+      ipv4_enabled = true
+    }
+  }
+
+  depends_on = [
+    null_resource.wait_for_apis
+  ]
+}
+
+resource "google_sql_database" "mlflow" {
+  name     = "mlflow"
+  instance = google_sql_database_instance.mlflow.name
+}
+
+resource "google_sql_user" "mlflow" {
+  name     = "mlflow"
+  instance = google_sql_database_instance.mlflow.name
+  password = random_password.mlflow_database.result
+}
+
+resource "google_secret_manager_secret" "mlflow_database_password" {
+  secret_id = "mlflow-database-password"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [
+    null_resource.wait_for_apis
+  ]
+}
+
+resource "google_secret_manager_secret_version" "mlflow_database_password" {
+  secret      = google_secret_manager_secret.mlflow_database_password.id
+  secret_data = random_password.mlflow_database.result
+}
+
 # --- IAM: Permissions for the Service Account ---
 resource "google_storage_bucket_iam_member" "sa_storage_admin" {
   bucket = google_storage_bucket.artifacts_bucket.name
@@ -66,23 +132,41 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
 
-  depends_on = [null_resource.wait_for_apis]
-
-  lifecycle {
-    ignore_changes = [
-      template,
-    ]
-  }
+  depends_on = [
+    google_sql_database.mlflow,
+    google_sql_user.mlflow,
+    google_secret_manager_secret_version.mlflow_database_password,
+    google_secret_manager_secret_iam_member.mlflow_database_password_access,
+    google_project_iam_member.sa_cloud_sql_client
+  ]
 
   template {
     service_account = google_service_account.mlops_sa.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+
+    volumes {
+      name = "cloudsql"
+
+      cloud_sql_instance {
+        instances = [
+          google_sql_database_instance.mlflow.connection_name
+        ]
+      }
+    }
 
     containers {
       image = "gcr.io/cloudrun/hello"
 
       resources {
+        cpu_idle = true
+
         limits = {
-          memory = "2Gi"
+          cpu    = "1"
+          memory = "1Gi"
         }
       }
 
@@ -90,9 +174,14 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
         container_port = 8080
       }
 
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
       env {
-        name  = "MLFLOW_BACKEND_STORE_URI"
-        value = "sqlite:////tmp/mlflow.db"
+        name  = "MLFLOW_ARTIFACT_ROOT"
+        value = "gs://${google_storage_bucket.artifacts_bucket.name}/mlruns"
       }
 
       env {
@@ -106,8 +195,29 @@ resource "google_cloud_run_v2_service" "mlflow_server" {
       }
 
       env {
-        name  = "MLFLOW_ARTIFACT_ROOT"
-        value = "gs://${google_storage_bucket.artifacts_bucket.name}/mlruns"
+        name  = "MLFLOW_DB_NAME"
+        value = google_sql_database.mlflow.name
+      }
+
+      env {
+        name  = "MLFLOW_DB_USER"
+        value = google_sql_user.mlflow.name
+      }
+
+      env {
+        name  = "CLOUD_SQL_CONNECTION_NAME"
+        value = google_sql_database_instance.mlflow.connection_name
+      }
+
+      env {
+        name = "MLFLOW_DB_PASSWORD"
+
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.mlflow_database_password.secret_id
+            version = "latest"
+          }
+        }
       }
     }
   }
@@ -163,8 +273,8 @@ resource "google_cloud_run_v2_service" "prediction_api" {
 # --- Workload Identity Federation ---
 
 resource "google_iam_workload_identity_pool" "github_pool" {
-  workload_identity_pool_id = "github-pool-v2"
-  display_name              = "GitHub Actions Pool V2"
+  workload_identity_pool_id = "github-pool"
+  display_name              = "GitHub Actions Pool"
   description               = "Identity pool for GitHub Actions automation"
 
   depends_on = [null_resource.wait_for_apis]
@@ -172,7 +282,7 @@ resource "google_iam_workload_identity_pool" "github_pool" {
 
 resource "google_iam_workload_identity_pool_provider" "github_provider" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_pool.workload_identity_pool_id
-  workload_identity_pool_provider_id = "github-provider-v2"
+  workload_identity_pool_provider_id = "github-provider"
 
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
@@ -210,6 +320,18 @@ resource "google_project_iam_member" "sa_user" {
   project = var.project_id
   role    = "roles/iam.serviceAccountUser"
   member  = "serviceAccount:${google_service_account.mlops_sa.email}"
+}
+
+resource "google_project_iam_member" "sa_cloud_sql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.mlops_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "mlflow_database_password_access" {
+  secret_id = google_secret_manager_secret.mlflow_database_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.mlops_sa.email}"
 }
 
 # --- Public Access ---

@@ -184,7 +184,9 @@ jobs:
 # -------------------------------------------------
   build-api:
     needs: smoke-test-api
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_GCP == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -250,7 +252,9 @@ jobs:
       - build-api
       - deploy-mlflow
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_GCP == 'true'
 
     env:
       APP_ENV: prod
@@ -352,7 +356,9 @@ jobs:
 # -------------------------------------------------
   build-mlflow:
     needs: smoke-test-api
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_GCP == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -421,14 +427,15 @@ jobs:
     needs: build-mlflow
     runs-on: ubuntu-latest
     #if: false
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_GCP == 'true'
 
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       GCP_ARTIFACT_REPO: ${{ vars.GCP_ARTIFACT_REPO }}
       GCS_BUCKET_NAME: ${{ vars.GCP_BUCKET_NAME }}
-      MLFLOW_BACKEND_STORE_URI: sqlite:////tmp/mlflow.db
       MLFLOW_ARTIFACT_ROOT: gs://${{ vars.GCP_BUCKET_NAME }}/mlruns
       MLFLOW_SERVER_ALLOWED_HOSTS: "*"
       MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: "*"
@@ -457,13 +464,62 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy MLflow via deployment CLI
+      - name: Resolve Cloud SQL connection name
+        shell: bash
         run: |
-          uv run --active python -m src.deployment.cli deploy mlflow --tag 3.15.1 \
-            --service-account "${{ secrets.GCP_SA_EMAIL }}" \
-            --project-id "$GCP_PROJECT_ID" \
+          connection_name="$(
+            gcloud sql instances describe mlflow-postgres-dev \
+              --project "$GCP_PROJECT_ID" \
+              --format='value(connectionName)'
+          )"
+
+          if [ -z "$connection_name" ]; then
+            echo "Cloud SQL connection name could not be resolved."
+            exit 1
+          fi
+
+          echo "CLOUD_SQL_CONNECTION_NAME=$connection_name" >> "$GITHUB_ENV"
+          echo "Cloud SQL connection resolved: $connection_name"
+
+      - name: Deploy MLflow with persistent Cloud SQL backend
+        shell: bash
+        run: |
+          gcloud run deploy mlflow-server \
+            --image "${GCP_ARTIFACT_REPO}/mlflow:3.15.1" \
+            --project "$GCP_PROJECT_ID" \
             --region "$GCP_REGION" \
-            --env-from MLFLOW_BACKEND_STORE_URI \
-            --env-from MLFLOW_ARTIFACT_ROOT \
-            --env-from MLFLOW_SERVER_ALLOWED_HOSTS \
-            --env-from MLFLOW_SERVER_CORS_ALLOWED_ORIGINS
+            --platform managed \
+            --service-account "${{ secrets.GCP_SA_EMAIL }}" \
+            --port 8080 \
+            --cpu 1 \
+            --memory 1Gi \
+            --min 0 \
+            --max 1 \
+            --add-cloudsql-instances "$CLOUD_SQL_CONNECTION_NAME" \
+            --set-env-vars "^@^MLFLOW_DB_NAME=mlflow@MLFLOW_DB_USER=mlflow@CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_CONNECTION_NAME}@MLFLOW_ARTIFACT_ROOT=${MLFLOW_ARTIFACT_ROOT}@MLFLOW_SERVER_ALLOWED_HOSTS=${MLFLOW_SERVER_ALLOWED_HOSTS}@MLFLOW_SERVER_CORS_ALLOWED_ORIGINS=${MLFLOW_SERVER_CORS_ALLOWED_ORIGINS}" \
+            --set-secrets "MLFLOW_DB_PASSWORD=mlflow-database-password:latest" \
+            --allow-unauthenticated \
+            --quiet
+      
+      - name: Verify MLflow health
+        shell: bash
+        run: |
+          mlflow_url="$(
+            gcloud run services describe mlflow-server \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_REGION" \
+              --format='value(status.url)'
+          )"
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${mlflow_url}/health" > /dev/null; then
+              echo "MLflow is healthy."
+              exit 0
+            fi
+
+            echo "MLflow is not ready yet: attempt=${attempt}"
+            sleep 5
+          done
+
+          echo "MLflow did not become healthy."
+          exit 1
